@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -27,9 +27,9 @@ import (
 
 	"github.com/dgraph-io/dgo/v250"
 	"github.com/dgraph-io/dgo/v250/protos/api"
-	"github.com/hypermodeinc/dgraph/v25/graphql/schema"
-	"github.com/hypermodeinc/dgraph/v25/testutil"
-	"github.com/hypermodeinc/dgraph/v25/x"
+	"github.com/dgraph-io/dgraph/v25/graphql/schema"
+	"github.com/dgraph-io/dgraph/v25/testutil"
+	"github.com/dgraph-io/dgraph/v25/x"
 )
 
 var (
@@ -55,13 +55,13 @@ var (
 	retryableCreateNamespaceErrors = append(retryableUpdateGQLSchemaErrors,
 		"is not indexed",
 	)
-
-	safelyUpdateGQLSchemaErr = "New Counter: %v, Old Counter: %v.\n" +
-		"Schema update counter didn't increment, " +
-		"indicating that the GraphQL layer didn't get the updated schema even after 10" +
-		" retries. The most probable cause is the new GraphQL schema is same as the old" +
-		" GraphQL schema."
 )
+
+const safelyUpdateGQLSchemaErr = "New Counter: %v, Old Counter: %v.\n" +
+	"Schema update counter didn't increment, " +
+	"indicating that the GraphQL layer didn't get the updated schema even after 10" +
+	" retries. The most probable cause is the new GraphQL schema is same as the old" +
+	" GraphQL schema."
 
 // GraphQLParams is parameters for constructing a GraphQL query - that's
 // http POST with this body, or http GET with this in the query string.

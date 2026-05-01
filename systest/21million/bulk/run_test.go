@@ -1,7 +1,7 @@
 //go:build integration
 
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hypermodeinc/dgraph/v25/chunker"
-	"github.com/hypermodeinc/dgraph/v25/systest/21million/common"
-	"github.com/hypermodeinc/dgraph/v25/testutil"
+	"github.com/dgraph-io/dgraph/v25/chunker"
+	"github.com/dgraph-io/dgraph/v25/systest/21million/common"
+	"github.com/dgraph-io/dgraph/v25/testutil"
 )
 
 func TestQueries(t *testing.T) {
@@ -69,11 +69,6 @@ func BenchmarkQueries(b *testing.B) {
 }
 
 func TestMain(m *testing.M) {
-	if runtime.GOOS != "linux" && os.Getenv("DGRAPH_BINARY") == "" {
-		fmt.Println("Skipping 21million bulk tests on non-Linux platforms due to dgraph binary dependency")
-		fmt.Println("You can set the DGRAPH_BINARY environment variable to path of a native dgraph binary to run these tests")
-		os.Exit(0)
-	}
 	schemaFile := filepath.Join(testutil.TestDataDirectory, "21million.schema")
 	rdfFile := filepath.Join(testutil.TestDataDirectory, "21million.rdf.gz")
 	if err := testutil.MakeDirEmpty([]string{"out/0", "out/1", "out/2"}); err != nil {

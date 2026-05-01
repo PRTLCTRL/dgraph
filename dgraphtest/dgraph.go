@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -84,14 +84,16 @@ type dnode interface {
 	alphaURL(*LocalCluster) (string, error)
 	zeroURL(*LocalCluster) (string, error)
 	changeStatus(bool)
+	setContainerID(string)
 }
 
 type zero struct {
-	id            int    // 0, 1, 2
-	containerID   string // container ID in docker world
-	containerName string // something like test-1234_zero2
-	aliasName     string // something like alpha0, zero1
-	isRunning     bool
+	id             int    // 0, 1, 2
+	containerID    string // container ID in docker world
+	containerName  string // something like test-1234_zero2
+	aliasName      string // something like alpha0, zero1
+	isRunning      bool
+	myAddrOverride string // if set, overrides the --my flag value
 }
 
 func (z *zero) cname() string {
@@ -127,7 +129,11 @@ func (z *zero) bindings(offset int) nat.PortMap {
 }
 
 func (z *zero) cmd(c *LocalCluster) []string {
-	zcmd := []string{"/gobin/dgraph", "zero", fmt.Sprintf("--my=%s:%v", z.aname(), zeroGrpcPort), "--bindall",
+	myAddr := fmt.Sprintf("%s:%v", z.aname(), zeroGrpcPort)
+	if z.myAddrOverride != "" {
+		myAddr = z.myAddrOverride
+	}
+	zcmd := []string{"/gobin/dgraph", "zero", fmt.Sprintf("--my=%s", myAddr), "--bindall",
 		fmt.Sprintf(`--replicas=%v`, c.conf.replicas), "--logtostderr", fmt.Sprintf("-v=%d", c.conf.verbosity)}
 
 	if c.lowerThanV21 {
@@ -168,6 +174,10 @@ func (z *zero) healthURL(c *LocalCluster) (string, error) {
 
 func (z *zero) changeStatus(isRunning bool) {
 	z.isRunning = isRunning
+}
+
+func (z *zero) setContainerID(cid string) {
+	z.containerID = cid
 }
 
 func (z *zero) assignURL(c *LocalCluster) (string, error) {
@@ -235,10 +245,9 @@ func (a *alpha) cmd(c *LocalCluster) []string {
 		"--bindall", "--logtostderr", fmt.Sprintf("-v=%d", c.conf.verbosity)}
 
 	if c.lowerThanV21 {
-		acmd = append(acmd, `--whitelist=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`, "--telemetry=false")
+		acmd = append(acmd, `--whitelist=0.0.0.0/0`, "--telemetry=false")
 	} else {
-		acmd = append(acmd, `--security=whitelist=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`,
-			"--telemetry=reports=false;")
+		acmd = append(acmd, `--security=whitelist=0.0.0.0/0`, "--telemetry=reports=false;")
 	}
 
 	if c.conf.lambdaURL != "" {
@@ -363,6 +372,10 @@ func (a *alpha) alphaURL(c *LocalCluster) (string, error) {
 
 func (a *alpha) changeStatus(isRunning bool) {
 	a.isRunning = isRunning
+}
+
+func (a *alpha) setContainerID(cid string) {
+	a.containerID = cid
 }
 
 func (a *alpha) zeroURL(c *LocalCluster) (string, error) {

@@ -1,7 +1,7 @@
 //go:build integration
 
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -24,8 +24,8 @@ import (
 
 	"github.com/dgraph-io/dgo/v250"
 	"github.com/dgraph-io/dgo/v250/protos/api"
-	"github.com/hypermodeinc/dgraph/v25/testutil"
-	"github.com/hypermodeinc/dgraph/v25/x"
+	"github.com/dgraph-io/dgraph/v25/testutil"
+	"github.com/dgraph-io/dgraph/v25/x"
 )
 
 var (
@@ -351,12 +351,6 @@ func TestLiveLoadFileNameMultipleCorrect(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	if runtime.GOOS != "linux" && os.Getenv("DGRAPH_BINARY") == "" {
-		fmt.Println("Skipping live load-uids tests on non-Linux platforms due to dgraph binary dependency")
-		fmt.Println("You can set the DGRAPH_BINARY environment variable to path of a native dgraph binary to run these tests")
-		os.Exit(0)
-	}
-
 	alphaService = testutil.GetSockAddr()
 	alphaName = testutil.Instance
 

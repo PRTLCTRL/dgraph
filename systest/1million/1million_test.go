@@ -1,7 +1,7 @@
 //go:build integration
 
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -12,15 +12,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/dgraph-io/dgo/v250/protos/api"
-	"github.com/hypermodeinc/dgraph/v25/systest/1million/common"
-	"github.com/hypermodeinc/dgraph/v25/testutil"
+	"github.com/dgraph-io/dgraph/v25/systest/1million/common"
+	"github.com/dgraph-io/dgraph/v25/testutil"
 )
 
 func Test1Million(t *testing.T) {
@@ -44,11 +43,6 @@ func Test1Million(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	if runtime.GOOS != "linux" && os.Getenv("DGRAPH_BINARY") == "" {
-		fmt.Println("Skipping 1million tests on non-Linux platforms due to dgraph binary dependency")
-		fmt.Println("You can set the DGRAPH_BINARY environment variable to path of a native dgraph binary to run these tests")
-		os.Exit(0)
-	}
 	noschemaFile := filepath.Join(testutil.TestDataDirectory, "1million-noindex.schema")
 	rdfFile := filepath.Join(testutil.TestDataDirectory, "1million.rdf.gz")
 	if err := testutil.MakeDirEmpty([]string{"out/0", "out/1", "out/2"}); err != nil {

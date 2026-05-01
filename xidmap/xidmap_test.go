@@ -1,7 +1,7 @@
 //go:build integration
 
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -21,9 +21,9 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/dgraph/v25/testutil"
+	"github.com/dgraph-io/dgraph/v25/x"
 	"github.com/dgraph-io/ristretto/v2/z"
-	"github.com/hypermodeinc/dgraph/v25/testutil"
-	"github.com/hypermodeinc/dgraph/v25/x"
 )
 
 // Opens a badger db and runs a a test on it.
@@ -100,10 +100,10 @@ func TestXidmapMemory(t *testing.T) {
 		fmt.Printf(" Loop = %.2fM", float64(atomic.LoadUint32(&loop))/1e6)
 		fmt.Printf(" NumGC = %v\n", m.NumGC)
 	}
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	ticker := time.Tick(time.Second)
+
 	go func() {
-		for range ticker.C {
+		for range ticker {
 			printMemory()
 		}
 	}()

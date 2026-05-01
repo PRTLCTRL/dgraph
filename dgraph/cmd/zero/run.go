@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -25,13 +25,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/dgraph-io/dgraph/v25/audit"
+	"github.com/dgraph-io/dgraph/v25/conn"
+	"github.com/dgraph-io/dgraph/v25/protos/pb"
+	"github.com/dgraph-io/dgraph/v25/raftwal"
+	"github.com/dgraph-io/dgraph/v25/worker"
+	"github.com/dgraph-io/dgraph/v25/x"
 	"github.com/dgraph-io/ristretto/v2/z"
-	"github.com/hypermodeinc/dgraph/v25/audit"
-	"github.com/hypermodeinc/dgraph/v25/conn"
-	"github.com/hypermodeinc/dgraph/v25/protos/pb"
-	"github.com/hypermodeinc/dgraph/v25/raftwal"
-	"github.com/hypermodeinc/dgraph/v25/worker"
-	"github.com/hypermodeinc/dgraph/v25/x"
 )
 
 type options struct {
@@ -142,7 +142,7 @@ func (st *state) serveGRPC(l net.Listener, store *raftwal.DiskStorage) {
 		grpc.MaxRecvMsgSize(x.GrpcMaxSize),
 		grpc.MaxSendMsgSize(x.GrpcMaxSize),
 		grpc.MaxConcurrentStreams(1000),
-		grpc.StatsHandler(otelgrpc.NewClientHandler()),
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.UnaryInterceptor(audit.AuditRequestGRPC),
 	}
 
@@ -287,7 +287,7 @@ func run() {
 
 	tlsCfg, err := x.LoadServerTLSConfig(Zero.Conf)
 	x.Check(err)
-	go x.StartListenHttpAndHttps(httpListener, tlsCfg, st.zero.closer)
+	go x.StartListenHttpAndHttps(httpListener, tlsCfg, st.zero.closer, nil)
 
 	baseMux := http.NewServeMux()
 	http.Handle("/", audit.AuditRequestHttp(baseMux))
@@ -346,6 +346,10 @@ func run() {
 		st.node.closer.SignalAndWait()
 		// Stop all internal requests.
 		_ = grpcListener.Close()
+		// Stop all pools
+		if pools := conn.GetPools(); pools != nil {
+			pools.RemoveAll()
+		}
 	}()
 
 	st.zero.closer.AddRunning(2)

@@ -1,7 +1,7 @@
 //go:build integration
 
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -26,9 +26,9 @@ import (
 	"github.com/dgraph-io/badger/v4/options"
 	"github.com/dgraph-io/dgo/v250"
 	"github.com/dgraph-io/dgo/v250/protos/api"
-	"github.com/hypermodeinc/dgraph/v25/testutil"
-	"github.com/hypermodeinc/dgraph/v25/worker"
-	"github.com/hypermodeinc/dgraph/v25/x"
+	"github.com/dgraph-io/dgraph/v25/testutil"
+	"github.com/dgraph-io/dgraph/v25/worker"
+	"github.com/dgraph-io/dgraph/v25/x"
 )
 
 var (
@@ -224,7 +224,10 @@ func copyToLocalFs(t *testing.T) {
 		minio.ListObjectsOptions{Prefix: "", Recursive: false})
 	for object := range objectCh1 {
 		require.NoError(t, object.Err)
-		if object.Key != "manifest.json" {
+		// Skip root-level JSON manifest files (manifest.json, manifest_summary.json,
+		// manifest_summary_tmp.json). The inner recursive loop downloads them as files;
+		// MkdirAll on a path that already exists as a file fails with "not a directory".
+		if !strings.HasSuffix(object.Key, ".json") {
 			dstDir := backupDir + "/" + object.Key
 			require.NoError(t, os.MkdirAll(dstDir, os.ModePerm))
 		}

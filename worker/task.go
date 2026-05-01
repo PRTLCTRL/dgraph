@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -26,18 +26,18 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/dgo/v250/protos/api"
-	"github.com/hypermodeinc/dgraph/v25/algo"
-	"github.com/hypermodeinc/dgraph/v25/conn"
-	"github.com/hypermodeinc/dgraph/v25/posting"
-	"github.com/hypermodeinc/dgraph/v25/protos/pb"
-	"github.com/hypermodeinc/dgraph/v25/schema"
-	ctask "github.com/hypermodeinc/dgraph/v25/task"
-	"github.com/hypermodeinc/dgraph/v25/tok"
-	"github.com/hypermodeinc/dgraph/v25/tok/hnsw"
-	"github.com/hypermodeinc/dgraph/v25/tok/index"
-	"github.com/hypermodeinc/dgraph/v25/types"
-	"github.com/hypermodeinc/dgraph/v25/types/facets"
-	"github.com/hypermodeinc/dgraph/v25/x"
+	"github.com/dgraph-io/dgraph/v25/algo"
+	"github.com/dgraph-io/dgraph/v25/conn"
+	"github.com/dgraph-io/dgraph/v25/posting"
+	"github.com/dgraph-io/dgraph/v25/protos/pb"
+	"github.com/dgraph-io/dgraph/v25/schema"
+	ctask "github.com/dgraph-io/dgraph/v25/task"
+	"github.com/dgraph-io/dgraph/v25/tok"
+	"github.com/dgraph-io/dgraph/v25/tok/hnsw"
+	"github.com/dgraph-io/dgraph/v25/tok/index"
+	"github.com/dgraph-io/dgraph/v25/types"
+	"github.com/dgraph-io/dgraph/v25/types/facets"
+	"github.com/dgraph-io/dgraph/v25/x"
 )
 
 func invokeNetworkRequest(ctx context.Context, addr string,
@@ -84,7 +84,6 @@ func processWithBackupRequest(
 	}()
 
 	timer := time.NewTimer(backupRequestGracePeriod)
-	defer timer.Stop()
 
 	select {
 	case <-ctx.Done():
@@ -112,7 +111,6 @@ func processWithBackupRequest(
 	case result := <-chResults:
 		if result.err != nil {
 			cancel() // Might as well cleanup resources ASAP
-			timer.Stop()
 			return invokeNetworkRequest(ctx, addrs[1], f)
 		}
 		return result.reply, nil
@@ -144,10 +142,19 @@ func ProcessTaskOverNetwork(ctx context.Context, q *pb.Query) (*pb.Result, error
 		return processTask(ctx, q, gid)
 	}
 
+	// Add span for cross-alpha network call
+	ctx, networkSpan := otel.Tracer("").Start(ctx, "ProcessTaskOverNetwork.RemoteCall")
+	networkSpan.SetAttributes(
+		attribute.String("target_group", fmt.Sprintf("%d", gid)),
+		attribute.String("predicate", x.SafeUTF8(attr)),
+		attribute.Bool("is_remote", true),
+	)
+
 	result, err := processWithBackupRequest(ctx, gid,
 		func(ctx context.Context, c pb.WorkerClient) (interface{}, error) {
 			return c.ServeTask(ctx, q)
 		})
+	networkSpan.End()
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +348,7 @@ func (qs *queryState) handleValuePostings(ctx context.Context, args funcArgs) er
 	defer stop()
 	span.AddEvent("Number of uids and args.srcFn", trace.WithAttributes(
 		attribute.Int64("uids_count", int64(srcFn.n)),
-		attribute.String("srcFn", fmt.Sprintf("%+v", args.srcFn))))
+		attribute.String("srcFn", x.SafeUTF8(fmt.Sprintf("%+v", args.srcFn)))))
 
 	switch srcFn.fnType {
 	case notAFunction, aggregatorFn, passwordFn, compareAttrFn, similarToFn:
@@ -368,12 +375,30 @@ func (qs *queryState) handleValuePostings(ctx context.Context, args funcArgs) er
 			return err
 		}
 		var nnUids []uint64
-		if srcFn.vectorInfo != nil {
-			nnUids, err = indexer.Search(ctx, qc, srcFn.vectorInfo,
-				int(numNeighbors), index.AcceptAll[float32])
+		// Build optional search options if provided
+		filter := index.AcceptAll[float32]
+		opts := index.VectorIndexOptions[float32]{Filter: filter}
+		if srcFn.vsEfOverride > 0 {
+			opts.EfOverride = srcFn.vsEfOverride
+		}
+		if srcFn.vsDistanceThreshold != nil {
+			opts.DistanceThreshold = srcFn.vsDistanceThreshold
+		}
+		hasOptions := opts.EfOverride > 0 || opts.DistanceThreshold != nil
+		if o, ok := indexer.(index.OptionalSearchOptions[float32]); ok && hasOptions {
+			if srcFn.vectorInfo != nil {
+				nnUids, err = o.SearchWithOptions(ctx, qc, srcFn.vectorInfo, int(numNeighbors), opts)
+			} else {
+				nnUids, err = o.SearchWithUidAndOptions(ctx, qc, srcFn.vectorUid, int(numNeighbors), opts)
+			}
 		} else {
-			nnUids, err = indexer.SearchWithUid(ctx, qc, srcFn.vectorUid,
-				int(numNeighbors), index.AcceptAll[float32])
+			if srcFn.vectorInfo != nil {
+				nnUids, err = indexer.Search(ctx, qc, srcFn.vectorInfo,
+					int(numNeighbors), index.AcceptAll[float32])
+			} else {
+				nnUids, err = indexer.SearchWithUid(ctx, qc, srcFn.vectorUid,
+					int(numNeighbors), index.AcceptAll[float32])
+			}
 		}
 
 		if err != nil && !strings.Contains(err.Error(), hnsw.EmptyHNSWTreeError+": "+badger.ErrKeyNotFound.Error()) {
@@ -774,7 +799,7 @@ func (qs *queryState) handleUidPostings(
 	defer stop()
 	span.AddEvent("Number of uids and args.srcFn", trace.WithAttributes(
 		attribute.Int64("uids_count", int64(srcFn.n)),
-		attribute.String("srcFn", fmt.Sprintf("%+v", args.srcFn))))
+		attribute.String("srcFn", x.SafeUTF8(fmt.Sprintf("%+v", args.srcFn)))))
 	if srcFn.n == 0 {
 		return nil
 	}
@@ -802,9 +827,9 @@ func (qs *queryState) handleUidPostings(
 	needFiltering := needsStringFiltering(srcFn, q.Langs, q.Attr)
 	isList := schema.State().IsList(q.Attr)
 
-	errCh := make(chan error, numGo)
 	outputs := make([]*pb.Result, numGo)
 
+	eg, egCtx := errgroup.WithContext(ctx)
 	calculate := func(start, end int) error {
 		x.AssertTrue(start%width == 0)
 		out := &pb.Result{}
@@ -813,8 +838,8 @@ func (qs *queryState) handleUidPostings(
 		for i := start; i < end; i++ {
 			if i%100 == 0 {
 				select {
-				case <-ctx.Done():
-					return ctx.Err()
+				case <-egCtx.Done():
+					return egCtx.Err()
 				default:
 				}
 			}
@@ -957,14 +982,12 @@ func (qs *queryState) handleUidPostings(
 		if end > srcFn.n {
 			end = srcFn.n
 		}
-		go func(start, end int) {
-			errCh <- calculate(start, end)
-		}(start, end)
+		eg.Go(func() error {
+			return calculate(start, end)
+		})
 	}
-	for range numGo {
-		if err := <-errCh; err != nil {
-			return err
-		}
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 	// All goroutines are done. Now attach their results.
 	out := args.out
@@ -991,10 +1014,11 @@ const (
 
 // processTask processes the query, accumulates and returns the result.
 func processTask(ctx context.Context, q *pb.Query, gid uint32) (*pb.Result, error) {
-	ctx, span := otel.Tracer("").Start(ctx, "processTask."+q.Attr)
+	safeAttr := x.SafeUTF8(q.Attr)
+	ctx, span := otel.Tracer("").Start(ctx, "processTask."+safeAttr)
 	defer span.End()
 
-	stop := x.SpanTimer(span, "processTask"+q.Attr)
+	stop := x.SpanTimer(span, "processTask"+safeAttr)
 	defer stop()
 
 	span.SetAttributes(
@@ -1224,7 +1248,7 @@ func (qs *queryState) handleRegexFunction(ctx context.Context, arg funcArgs) err
 	if span != nil {
 		span.AddEvent("Processing UIDs", trace.WithAttributes(
 			attribute.Int64("uid_count", int64(arg.srcFn.n)),
-			attribute.String("srcFn", fmt.Sprintf("%+v", arg.srcFn))))
+			attribute.String("srcFn", x.SafeUTF8(fmt.Sprintf("%+v", arg.srcFn)))))
 	}
 
 	attr := arg.q.Attr
@@ -1341,7 +1365,7 @@ func (qs *queryState) handleCompareFunction(ctx context.Context, arg funcArgs) e
 	defer stop()
 	span.AddEvent("Processing UIDs", trace.WithAttributes(
 		attribute.Int64("uid_count", int64(arg.srcFn.n)),
-		attribute.String("srcFn", fmt.Sprintf("%+v", arg.srcFn))))
+		attribute.String("srcFn", x.SafeUTF8(fmt.Sprintf("%+v", arg.srcFn)))))
 
 	attr := arg.q.Attr
 	span.AddEvent("Function information", trace.WithAttributes(
@@ -1384,7 +1408,7 @@ func (qs *queryState) handleCompareFunction(ctx context.Context, arg funcArgs) e
 			switch lang {
 			case "":
 				if isList {
-					pl, err := posting.GetNoStore(x.DataKey(attr, uid), arg.q.ReadTs)
+					pl, err := qs.cache.Get(x.DataKey(attr, uid))
 					if err != nil {
 						filterErr = err
 						return false
@@ -1406,7 +1430,7 @@ func (qs *queryState) handleCompareFunction(ctx context.Context, arg funcArgs) e
 					return false
 				}
 
-				pl, err := posting.GetNoStore(x.DataKey(attr, uid), arg.q.ReadTs)
+				pl, err := qs.cache.Get(x.DataKey(attr, uid))
 				if err != nil {
 					filterErr = err
 					return false
@@ -1421,7 +1445,7 @@ func (qs *queryState) handleCompareFunction(ctx context.Context, arg funcArgs) e
 				dst, err := types.Convert(sv, typ)
 				return err == nil && compareFunc(dst)
 			case ".":
-				pl, err := posting.GetNoStore(x.DataKey(attr, uid), arg.q.ReadTs)
+				pl, err := qs.cache.Get(x.DataKey(attr, uid))
 				if err != nil {
 					filterErr = err
 					return false
@@ -1439,17 +1463,26 @@ func (qs *queryState) handleCompareFunction(ctx context.Context, arg funcArgs) e
 				}
 				return false
 			default:
-				sv, err := fetchValue(uid, attr, arg.q.Langs, typ, arg.q.ReadTs)
+				pl, err := qs.cache.Get(x.DataKey(attr, uid))
+				if err != nil {
+					filterErr = err
+					return false
+				}
+				src, err := pl.ValueFor(arg.q.ReadTs, arg.q.Langs)
 				if err != nil {
 					if err != posting.ErrNoValue {
 						filterErr = err
 					}
 					return false
 				}
-				if sv.Value == nil {
+				dst, err := types.Convert(src, typ)
+				if err != nil {
 					return false
 				}
-				return compareFunc(sv)
+				if dst.Value == nil {
+					return false
+				}
+				return compareFunc(dst)
 			}
 		})
 		if filterErr != nil {
@@ -1500,7 +1533,7 @@ func (qs *queryState) handleMatchFunction(ctx context.Context, arg funcArgs) err
 	defer stop()
 	span.AddEvent("Processing UIDs", trace.WithAttributes(
 		attribute.Int64("uid_count", int64(arg.srcFn.n)),
-		attribute.String("srcFn", fmt.Sprintf("%+v", arg.srcFn))))
+		attribute.String("srcFn", x.SafeUTF8(fmt.Sprintf("%+v", arg.srcFn)))))
 
 	attr := arg.q.Attr
 	typ := arg.srcFn.atype
@@ -1604,11 +1637,20 @@ func (qs *queryState) filterGeoFunction(ctx context.Context, arg funcArgs) error
 		attribute.Int("num_go", numGo),
 		attribute.Int("width", width)))
 
+	eg, egCtx := errgroup.WithContext(ctx)
 	filtered := make([]*pb.List, numGo)
 	filter := func(idx, start, end int) error {
 		filtered[idx] = &pb.List{}
 		out := filtered[idx]
-		for _, uid := range uids.Uids[start:end] {
+		for i := start; i < end; i++ {
+			uid := uids.Uids[i]
+			if i%100 == 0 {
+				select {
+				case <-egCtx.Done():
+					return egCtx.Err()
+				default:
+				}
+			}
 			pl, err := qs.cache.Get(x.DataKey(attr, uid))
 			if err != nil {
 				return err
@@ -1630,21 +1672,19 @@ func (qs *queryState) filterGeoFunction(ctx context.Context, arg funcArgs) error
 		return nil
 	}
 
-	errCh := make(chan error, numGo)
 	for i := range numGo {
 		start := i * width
 		end := start + width
 		if end > len(uids.Uids) {
 			end = len(uids.Uids)
 		}
-		go func(idx, start, end int) {
-			errCh <- filter(idx, start, end)
-		}(i, start, end)
+		idx := i
+		eg.Go(func() error {
+			return filter(idx, start, end)
+		})
 	}
-	for range numGo {
-		if err := <-errCh; err != nil {
-			return err
-		}
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 	final := &pb.List{}
 	for _, out := range filtered {
@@ -1796,6 +1836,9 @@ type functionContext struct {
 	atype          types.TypeID
 	vectorInfo     []float32
 	vectorUid      uint64
+	// Optional vector search options parsed from a 3rd arg on similar_to
+	vsEfOverride        int
+	vsDistanceThreshold *float64
 }
 
 const (
@@ -2019,6 +2062,12 @@ func parseSrcFn(ctx context.Context, q *pb.Query) (*functionContext, error) {
 				return nil, errors.Wrapf(err, "Compare %v(%v) require digits, but got invalid num",
 					q.SrcFunc.Name, q.SrcFunc.Args[0])
 			}
+			// Threshold values are used as uint32 in count keys (see evaluate function).
+			// Validate they fit in uint32 range to prevent overflow.
+			if threshold < 0 || threshold > math.MaxUint32 {
+				return nil, errors.Errorf("Compare %v: threshold value %d must be between 0 and %d",
+					q.SrcFunc.Name, threshold, math.MaxUint32)
+			}
 			thresholds = append(thresholds, threshold)
 		}
 		fc.threshold = thresholds
@@ -2123,12 +2172,20 @@ func parseSrcFn(ctx context.Context, q *pb.Query) (*functionContext, error) {
 		}
 		checkRoot(q, fc)
 	case similarToFn:
-		if err = ensureArgsCount(q.SrcFunc, 2); err != nil {
-			return nil, err
+		// similar_to accepts 2 mandatory args: k, vector_or_uid followed by optional key:value pairs
+		// Example: similar_to(vpred, 3, $vec, ef: 64, distance_threshold: 0.5)
+		if len(q.SrcFunc.Args) < 2 || (len(q.SrcFunc.Args) > 2 && (len(q.SrcFunc.Args)-2)%2 != 0) {
+			return nil, errors.Errorf("Function '%s' requires 2 arguments plus optional key:value pairs, but got %d (%v)",
+				q.SrcFunc.Name, len(q.SrcFunc.Args), q.SrcFunc.Args)
 		}
 		fc.vectorInfo, fc.vectorUid, err = interpretVFloatOrUid(q.SrcFunc.Args[1])
 		if err != nil {
 			return nil, err
+		}
+		if len(q.SrcFunc.Args) > 2 {
+			if err := parseSimilarToOptions(q.SrcFunc.Args[2:], fc); err != nil {
+				return nil, err
+			}
 		}
 	case uidInFn:
 		for _, arg := range q.SrcFunc.Args {
@@ -2169,7 +2226,14 @@ func interpretVFloatOrUid(val string) ([]float32, uint64, error) {
 
 // ServeTask is used to respond to a query.
 func (w *grpcWorker) ServeTask(ctx context.Context, q *pb.Query) (*pb.Result, error) {
-	ctx, span := otel.Tracer("").Start(ctx, "worker.ServeTask")
+	// Manually extract trace context from gRPC metadata using the propagator
+	// This ensures the trace context is properly extracted for cross-alpha tracing
+	ctx = x.ExtractTraceContext(ctx)
+
+	// Sanitize attr for span name to ensure valid UTF-8 for OTLP export
+	safeAttr := x.SafeUTF8(q.Attr)
+	ctx, span := otel.Tracer("").Start(ctx, "worker.ServeTask",
+		trace.WithAttributes(attribute.String("predicate", safeAttr)))
 	defer span.End()
 
 	if ctx.Err() != nil {
@@ -2706,5 +2770,57 @@ func (qs *queryState) handleHasFunction(ctx context.Context, q *pb.Query, out *p
 	span.AddEvent("handleHasFunction result", trace.WithAttributes(
 		attribute.Int("uid_count", len(result.Uids))))
 	out.UidMatrix = append(out.UidMatrix, result)
+	return nil
+}
+
+// parseSimilarToOptions parses named options passed after similar_to 2 mandatory args (k, vecOrUid)
+// The parser encodes these as key/value pairs: ["ef", "64", "distance_threshold", "0.5", ...]
+func parseSimilarToOptions(args []string, fc *functionContext) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if len(args)%2 != 0 {
+		return errors.Errorf("Malformed option in similar_to: expected key:value pairs, got %v", args)
+	}
+	seen := make(map[string]struct{}, len(args)/2)
+	for i := 0; i < len(args); i += 2 {
+		k := strings.ToLower(strings.TrimSpace(args[i]))
+		v := strings.TrimSpace(args[i+1])
+		if strings.HasSuffix(k, ":") {
+			k = strings.TrimSuffix(k, ":")
+		}
+		if len(k) == 0 {
+			return errors.Errorf("Malformed option in similar_to: empty key")
+		}
+		if _, dup := seen[k]; dup {
+			return errors.Errorf("Duplicate key in similar_to options: %q", k)
+		}
+		seen[k] = struct{}{}
+
+		v = strings.Trim(v, "\"'")
+		switch k {
+		case "ef":
+			n, perr := strconv.ParseInt(v, 10, 32)
+			if perr != nil {
+				return errors.Errorf("Invalid value for 'ef' in similar_to: %q", v)
+			}
+			if n <= 0 {
+				return errors.Errorf("Value for 'ef' must be positive, got: %d", n)
+			}
+			fc.vsEfOverride = int(n)
+		case "distance_threshold":
+			f, perr := strconv.ParseFloat(v, 64)
+			if perr != nil {
+				return errors.Errorf("Invalid value for 'distance_threshold' in similar_to: %q", v)
+			}
+			if f < 0 {
+				return errors.Errorf("Value for 'distance_threshold' must be non-negative, got: %v", f)
+			}
+			fc.vsDistanceThreshold = new(float64)
+			*fc.vsDistanceThreshold = f
+		default:
+			return errors.Errorf("Unknown option in similar_to: %q", k)
+		}
+	}
 	return nil
 }

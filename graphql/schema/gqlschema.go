@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dgraph-io/dgraph/v25/x"
 	"github.com/dgraph-io/gqlparser/v2/ast"
 	"github.com/dgraph-io/gqlparser/v2/gqlerror"
 	"github.com/dgraph-io/gqlparser/v2/parser"
-	"github.com/hypermodeinc/dgraph/v25/x"
 )
 
 const (
@@ -2088,6 +2088,25 @@ func addSimilarByEmbeddingQuery(schema *ast.Schema, defn *ast.Definition) {
 			NonNull: true,
 		},
 	})
+
+	// Accept optional ef parameter for HNSW search
+	qry.Arguments = append(qry.Arguments, &ast.ArgumentDefinition{
+		Name: SimilarEfArgName,
+		Type: &ast.Type{
+			NamedType: "Int",
+			NonNull:   false,
+		},
+	})
+
+	// Accept optional distance_threshold parameter for filtering results
+	qry.Arguments = append(qry.Arguments, &ast.ArgumentDefinition{
+		Name: SimilarDistanceThresholdArgName,
+		Type: &ast.Type{
+			NamedType: "Float",
+			NonNull:   false,
+		},
+	})
+
 	addFilterArgument(schema, qry)
 
 	schema.Query.Fields = append(schema.Query.Fields, qry)
@@ -2194,6 +2213,24 @@ func addSimilarByIdQuery(schema *ast.Schema, defn *ast.Definition,
 		Type: &ast.Type{
 			NamedType: "Int",
 			NonNull:   true,
+		},
+	})
+
+	// Accept optional ef parameter for HNSW search
+	qry.Arguments = append(qry.Arguments, &ast.ArgumentDefinition{
+		Name: SimilarEfArgName,
+		Type: &ast.Type{
+			NamedType: "Int",
+			NonNull:   false,
+		},
+	})
+
+	// Accept optional distance_threshold parameter for filtering results
+	qry.Arguments = append(qry.Arguments, &ast.ArgumentDefinition{
+		Name: SimilarDistanceThresholdArgName,
+		Type: &ast.Type{
+			NamedType: "Float",
+			NonNull:   false,
 		},
 	})
 

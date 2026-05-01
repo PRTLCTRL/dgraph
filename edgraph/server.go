@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: © Hypermode Inc. <hello@hypermode.com>
+ * SPDX-FileCopyrightText: © 2017-2025 Istari Digital, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,20 +36,19 @@ import (
 
 	"github.com/dgraph-io/dgo/v250"
 	"github.com/dgraph-io/dgo/v250/protos/api"
-	apiv2 "github.com/dgraph-io/dgo/v250/protos/api.v2"
-	"github.com/hypermodeinc/dgraph/v25/chunker"
-	"github.com/hypermodeinc/dgraph/v25/conn"
-	"github.com/hypermodeinc/dgraph/v25/dql"
-	gqlSchema "github.com/hypermodeinc/dgraph/v25/graphql/schema"
-	"github.com/hypermodeinc/dgraph/v25/posting"
-	"github.com/hypermodeinc/dgraph/v25/protos/pb"
-	"github.com/hypermodeinc/dgraph/v25/query"
-	"github.com/hypermodeinc/dgraph/v25/schema"
-	"github.com/hypermodeinc/dgraph/v25/tok"
-	"github.com/hypermodeinc/dgraph/v25/types"
-	"github.com/hypermodeinc/dgraph/v25/types/facets"
-	"github.com/hypermodeinc/dgraph/v25/worker"
-	"github.com/hypermodeinc/dgraph/v25/x"
+	"github.com/dgraph-io/dgraph/v25/chunker"
+	"github.com/dgraph-io/dgraph/v25/conn"
+	"github.com/dgraph-io/dgraph/v25/dql"
+	gqlSchema "github.com/dgraph-io/dgraph/v25/graphql/schema"
+	"github.com/dgraph-io/dgraph/v25/posting"
+	"github.com/dgraph-io/dgraph/v25/protos/pb"
+	"github.com/dgraph-io/dgraph/v25/query"
+	"github.com/dgraph-io/dgraph/v25/schema"
+	"github.com/dgraph-io/dgraph/v25/tok"
+	"github.com/dgraph-io/dgraph/v25/types"
+	"github.com/dgraph-io/dgraph/v25/types/facets"
+	"github.com/dgraph-io/dgraph/v25/worker"
+	"github.com/dgraph-io/dgraph/v25/x"
 )
 
 const (
@@ -710,11 +710,102 @@ func validateMutation(ctx context.Context, edges []*pb.DirectedEdge) error {
 	return nil
 }
 
+// validateCondValue checks that a cond string is a well-formed @if(...) or @filter(...)
+// clause with balanced parentheses and no trailing content. This prevents DQL injection
+// via crafted cond values that close the parenthesized expression and append additional
+// query blocks.
+func validateCondValue(cond string) error {
+	cond = strings.TrimSpace(cond)
+	if cond == "" {
+		return nil
+	}
+
+	lower := strings.ToLower(cond)
+	if !strings.HasPrefix(lower, "@if(") && !strings.HasPrefix(lower, "@filter(") {
+		return errors.Errorf("invalid cond value: must start with @if( or @filter(")
+	}
+
+	openIdx := strings.Index(cond, "(")
+	if openIdx == -1 {
+		return errors.Errorf("invalid cond value: missing opening parenthesis")
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	closingIdx := -1
+
+	for i := openIdx; i < len(cond); i++ {
+		ch := cond[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if ch == '(' {
+			depth++
+		} else if ch == ')' {
+			depth--
+			if depth == 0 {
+				closingIdx = i
+				break
+			}
+		}
+	}
+
+	if closingIdx == -1 {
+		return errors.Errorf("invalid cond value: unbalanced parentheses")
+	}
+
+	trailing := strings.TrimSpace(cond[closingIdx+1:])
+	if trailing != "" {
+		return errors.Errorf("invalid cond value: unexpected content after condition")
+	}
+
+	return nil
+}
+
+// valVarRegexp matches a valid val(variableName) reference used in upsert mutations.
+var valVarRegexp = regexp.MustCompile(`^val\([a-zA-Z_][a-zA-Z0-9_.]*\)$`)
+
+// validateValObjectId checks that an ObjectId starting with "val(" is a well-formed
+// val(variableName) reference and contains no injected DQL syntax.
+func validateValObjectId(objectId string) error {
+	if !valVarRegexp.MatchString(objectId) {
+		return errors.Errorf("invalid val() reference in ObjectId: %q", objectId)
+	}
+	return nil
+}
+
+// langTagRegexp matches a valid BCP 47 language tag (letters, digits, hyphens).
+var langTagRegexp = regexp.MustCompile(`^[a-zA-Z]+(-[a-zA-Z0-9]+)*$`)
+
+// validateLangTag checks that a language tag contains only safe characters.
+func validateLangTag(lang string) error {
+	if lang == "" {
+		return nil
+	}
+	if !langTagRegexp.MatchString(lang) {
+		return errors.Errorf("invalid language tag: %q", lang)
+	}
+	return nil
+}
+
 // buildUpsertQuery modifies the query to evaluate the
 // @if condition defined in Conditional Upsert.
-func buildUpsertQuery(qc *queryContext) string {
+func buildUpsertQuery(qc *queryContext) (string, error) {
 	if qc.req.Query == "" || len(qc.gmuList) == 0 {
-		return qc.req.Query
+		return qc.req.Query, nil
 	}
 
 	qc.condVars = make([]string, len(qc.req.Mutations))
@@ -725,6 +816,10 @@ func buildUpsertQuery(qc *queryContext) string {
 	for i, gmu := range qc.gmuList {
 		isCondUpsert := strings.TrimSpace(gmu.Cond) != ""
 		if isCondUpsert {
+			if err := validateCondValue(gmu.Cond); err != nil {
+				return "", err
+			}
+
 			qc.condVars[i] = fmt.Sprintf("__dgraph_upsertcheck_%v__", strconv.Itoa(i))
 			qc.uidRes[qc.condVars[i]] = nil
 			// @if in upsert is same as @filter in the query
@@ -754,7 +849,7 @@ func buildUpsertQuery(qc *queryContext) string {
 	}
 
 	x.Check2(upsertQB.WriteString(`}`))
-	return upsertQB.String()
+	return upsertQB.String(), nil
 }
 
 // updateMutations updates the mutation and replaces uid(var) and val(var) with
@@ -1248,11 +1343,6 @@ func (s *Server) doQuery(ctx context.Context, req *Request) (resp *api.Response,
 	l := &query.Latency{}
 	l.Start = time.Now()
 
-	if bool(glog.V(3)) || worker.LogDQLRequestEnabled() {
-		glog.Infof("Got a query, DQL form: %+v %+v at %+v",
-			req.req.Query, req.req.Mutations, l.Start.Format(time.RFC3339))
-	}
-
 	isMutation := len(req.req.Mutations) > 0
 	methodRequest := methodQuery
 	if isMutation {
@@ -1263,6 +1353,15 @@ func (s *Server) doQuery(ctx context.Context, req *Request) (resp *api.Response,
 	ctx, span := otel.Tracer("").Start(ctx, methodRequest)
 	if ns, err := x.ExtractNamespace(ctx); err == nil {
 		annotateNamespace(span, ns)
+	}
+
+	if bool(glog.V(3)) || worker.LogDQLRequestEnabled() {
+		traceID := ""
+		if span.SpanContext().IsValid() {
+			traceID = fmt.Sprintf(" [trace_id=%s]", span.SpanContext().TraceID().String())
+		}
+		glog.Infof("Got a query, DQL form: %+v %+v at %+v%s",
+			req.req.Query, req.req.Mutations, l.Start.Format(time.RFC3339), traceID)
 	}
 
 	ctx = x.WithMethod(ctx, methodRequest)
@@ -1276,6 +1375,16 @@ func (s *Server) doQuery(ctx context.Context, req *Request) (resp *api.Response,
 		timeSpentMs := x.SinceMs(l.Start)
 		measurements = append(measurements, x.LatencyMs.M(timeSpentMs))
 		ostats.Record(ctx, measurements...)
+
+		// Log slow queries with structured fields for observability
+		if x.WorkerConfig.SlowQueryLogThreshold > 0 {
+			x.LogSlowOperation(ctx, "query", "dql", req.req.Query, &x.SlowOperationLatency{
+				Start:      l.Start,
+				Parsing:    l.Parsing,
+				Processing: l.Processing,
+				Encoding:   l.Json,
+			})
+		}
 	}()
 
 	if rerr = x.HealthCheck(); rerr != nil {
@@ -1382,6 +1491,7 @@ func (s *Server) doQuery(ctx context.Context, req *Request) (resp *api.Response,
 		EncodingNs:        uint64(l.Json.Nanoseconds()),
 		TotalNs:           uint64((time.Since(l.Start)).Nanoseconds()),
 	}
+
 	return resp, gqlErrs
 }
 
@@ -1567,7 +1677,11 @@ func parseRequest(ctx context.Context, qc *queryContext) error {
 
 		qc.uidRes = make(map[string][]string)
 		qc.valRes = make(map[string]*types.ShardedMap)
-		upsertQuery = buildUpsertQuery(qc)
+		var err error
+		upsertQuery, err = buildUpsertQuery(qc)
+		if err != nil {
+			return err
+		}
 		needVars = findMutationVars(qc)
 		if upsertQuery == "" {
 			if len(needVars) > 0 {
@@ -1694,6 +1808,41 @@ func addQueryIfUnique(qctx context.Context, qc *queryContext) error {
 	}
 	isGalaxyQuery := x.IsRootNsOperation(ctx)
 
+	missingPreds := make(map[string]struct{})
+	for _, gmu := range qc.gmuList {
+		for _, pred := range gmu.Set {
+			currNs := namespace
+			if isGalaxyQuery {
+				currNs = pred.Namespace
+			}
+			if pred.Predicate == "dgraph.xid" {
+				continue
+			}
+			fullPred := x.NamespaceAttr(currNs, pred.Predicate)
+			if _, ok := schema.State().Get(ctx, fullPred); !ok {
+				missingPreds[fullPred] = struct{}{}
+			}
+		}
+	}
+
+	repaired := make(map[string]bool)
+	if len(missingPreds) > 0 {
+		predList := make([]string, 0, len(missingPreds))
+		for p := range missingPreds {
+			predList = append(predList, p)
+		}
+
+		schReq := &pb.SchemaRequest{Predicates: predList}
+		remoteNodes, err := worker.GetSchemaOverNetwork(ctx, schReq)
+		if err != nil {
+			return errors.Wrapf(err, "unique validation failed to fetch schema for predicates %v", predList)
+		}
+
+		for _, node := range remoteNodes {
+			repaired[node.Predicate] = node.Unique
+		}
+	}
+
 	qc.uniqueVars = map[uint64]uniquePredMeta{}
 	for gmuIndex, gmu := range qc.gmuList {
 		var buildQuery strings.Builder
@@ -1707,7 +1856,16 @@ func addQueryIfUnique(qctx context.Context, qc *queryContext) error {
 				// [TODO] Don't check if it's dgraph.xid. It's a bug as this node might not be aware
 				// of the schema for the given predicate. This is a bug issue for dgraph.xid hence
 				// we are bypassing it manually until the bug is fixed.
-				predSchema, ok := schema.State().Get(ctx, x.NamespaceAttr(namespace, pred.Predicate))
+				fullPred := x.NamespaceAttr(namespace, pred.Predicate)
+				predSchema, ok := schema.State().Get(ctx, fullPred)
+				if !ok {
+					u, found := repaired[fullPred]
+					if found {
+						predSchema.Unique = u
+						ok = true
+					}
+				}
+
 				if !ok || !predSchema.Unique {
 					continue
 				}
@@ -1719,6 +1877,9 @@ func addQueryIfUnique(qctx context.Context, qc *queryContext) error {
 			// during the automatic serialization of a structure into JSON.
 			predicateName := fmt.Sprintf("<%v>", pred.Predicate)
 			if pred.Lang != "" {
+				if err := validateLangTag(pred.Lang); err != nil {
+					return err
+				}
 				predicateName = fmt.Sprintf("%v@%v", predicateName, pred.Lang)
 			}
 
@@ -1746,6 +1907,9 @@ func addQueryIfUnique(qctx context.Context, qc *queryContext) error {
 			// in the mutation, then we reject the mutation.
 
 			if !strings.HasPrefix(pred.ObjectId, "val(") {
+				if pred.ObjectValue == nil {
+					continue
+				}
 				val := strconv.Quote(fmt.Sprintf("%v", dql.TypeValFrom(pred.ObjectValue).Value))
 				query := fmt.Sprintf(`%v as var(func: eq(%v,"%v"))`, queryVar, predicateName, val[1:len(val)-1])
 				if _, err := buildQuery.WriteString(query); err != nil {
@@ -1753,6 +1917,9 @@ func addQueryIfUnique(qctx context.Context, qc *queryContext) error {
 				}
 				qc.uniqueVars[uniqueVarMapKey] = uniquePredMeta{queryVar: queryVar}
 			} else {
+				if err := validateValObjectId(pred.ObjectId); err != nil {
+					return err
+				}
 				valQueryVar := fmt.Sprintf("__dgraph_uniquecheck_val_%v__", uniqueVarMapKey)
 				query := fmt.Sprintf(`%v as var(func: eq(%v,%v)){
 					                             uid
@@ -1816,8 +1983,8 @@ func validateNamespace(ctx context.Context, tc *api.TxnContext) error {
 	return nil
 }
 
-func (s *ServerV25) UpdateExtSnapshotStreamingState(ctx context.Context,
-	req *apiv2.UpdateExtSnapshotStreamingStateRequest) (v *apiv2.UpdateExtSnapshotStreamingStateResponse, err error) {
+func (s *Server) UpdateExtSnapshotStreamingState(ctx context.Context,
+	req *api.UpdateExtSnapshotStreamingStateRequest) (v *api.UpdateExtSnapshotStreamingStateResponse, err error) {
 
 	if req == nil {
 		return nil, errors.New("UpdateExtSnapshotStreamingStateRequest must not be nil")
@@ -1829,18 +1996,22 @@ func (s *ServerV25) UpdateExtSnapshotStreamingState(ctx context.Context,
 
 	groups, err := worker.ProposeDrain(ctx, req)
 	if err != nil {
+		glog.Errorf("[import] failed to propose drain mode: %v", err)
 		return nil, err
 	}
 
-	resp := &apiv2.UpdateExtSnapshotStreamingStateResponse{Groups: groups}
+	resp := &api.UpdateExtSnapshotStreamingStateResponse{Groups: groups}
 
 	return resp, nil
 }
 
-func (s *ServerV25) StreamExtSnapshot(stream apiv2.Dgraph_StreamExtSnapshotServer) error {
+func (s *Server) StreamExtSnapshot(stream api.Dgraph_StreamExtSnapshotServer) error {
 	defer x.ExtSnapshotStreamingState(false)
-
-	return worker.InStream(stream)
+	if err := worker.InStream(stream); err != nil {
+		glog.Errorf("[import] failed to stream external snapshot: %v", err)
+		return err
+	}
+	return nil
 }
 
 // CommitOrAbort commits or aborts a transaction.
@@ -2156,6 +2327,9 @@ func verifyUniqueWithinMutation(qc *queryContext) error {
 			continue
 		}
 		pred1 := qc.gmuList[gmuIndex].Set[rdfIndex]
+		if pred1.ObjectValue == nil {
+			continue
+		}
 		pred1Value := dql.TypeValFrom(pred1.ObjectValue).Value
 		for j := range qc.uniqueVars {
 			if i == j {
@@ -2167,6 +2341,9 @@ func verifyUniqueWithinMutation(qc *queryContext) error {
 				continue
 			}
 			pred2 := qc.gmuList[gmuIndex2].Set[rdfIndex2]
+			if pred2.ObjectValue == nil {
+				continue
+			}
 			if pred2.Predicate == pred1.Predicate && dql.TypeValFrom(pred2.ObjectValue).Value == pred1Value &&
 				pred2.Subject != pred1.Subject {
 				return errors.Errorf("could not insert duplicate value [%v] for predicate [%v]",
