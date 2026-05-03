@@ -813,17 +813,17 @@ func verifyTypes(ctx context.Context, m *pb.Mutations) error {
 			return err
 		}
 
-		for _, field := range t.Fields {
-			fieldName := field.Predicate
-			ns, attr := x.ParseNamespaceAttr(fieldName)
-			if attr[0] == '~' {
-				fieldName = x.NamespaceAttr(ns, attr[1:])
-			}
-
-			if _, ok := reqPredSet[fieldName]; !ok {
-				fields = append(fields, fieldName)
-			}
+	for _, field := range t.Fields {
+		fieldName := field.Predicate
+		ns, attr := x.ParseNamespaceAttr(fieldName)
+		if len(attr) > 0 && attr[0] == '~' {
+			fieldName = x.NamespaceAttr(ns, attr[1:])
 		}
+
+		if _, ok := reqPredSet[fieldName]; !ok {
+			fields = append(fields, fieldName)
+		}
+	}
 	}
 
 	// Retrieve the schema for those predicates.
@@ -842,7 +842,7 @@ func verifyTypes(ctx context.Context, m *pb.Mutations) error {
 		for _, field := range t.Fields {
 			fieldName := field.Predicate
 			ns, attr := x.ParseNamespaceAttr(fieldName)
-			if attr[0] == '~' {
+			if len(attr) > 0 && attr[0] == '~' {
 				fieldName = x.NamespaceAttr(ns, attr[1:])
 			}
 

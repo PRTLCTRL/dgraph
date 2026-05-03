@@ -288,3 +288,38 @@ func TestNsSeparator(t *testing.T) {
 	require.Equal(t, RootNamespace, ns)
 	require.Equal(t, pred, attr)
 }
+
+func TestParseMalformedAttr(t *testing.T) {
+	attr := ParseAttr("malformed")
+	require.Equal(t, "", attr)
+
+	attr = ParseAttr("")
+	require.Equal(t, "", attr)
+
+	ns, attr := ParseNamespaceAttr("malformed")
+	require.Equal(t, uint64(0), ns)
+	require.Equal(t, "", attr)
+
+	ns, attr = ParseNamespaceAttr("")
+	require.Equal(t, uint64(0), ns)
+	require.Equal(t, "", attr)
+
+	nsBytes, attr := ParseNamespaceBytes("malformed")
+	require.Equal(t, make([]byte, 8), nsBytes)
+	require.Equal(t, "", attr)
+
+	ns = ParseNamespace("malformed")
+	require.Equal(t, uint64(0), ns)
+
+	isReverse := IsReverseAttr("malformed")
+	require.False(t, isReverse)
+
+	isReverse = IsReverseAttr("")
+	require.False(t, isReverse)
+
+	isReverse = IsReverseAttr("0-~reverse")
+	require.True(t, isReverse)
+
+	isReverse = IsReverseAttr("0-normal")
+	require.False(t, isReverse)
+}

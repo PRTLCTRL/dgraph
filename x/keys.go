@@ -94,24 +94,50 @@ func AttrInRootNamespace(attr string) string {
 // ParseNamespaceAttr returns the namespace and attr from the given value.
 func ParseNamespaceAttr(attr string) (uint64, string) {
 	splits := strings.SplitN(attr, NsSeparator, 2)
-	return strToUint(splits[0]), splits[1]
+	if len(splits) < 2 || splits[0] == "" {
+		return 0, ""
+	}
+	ns, err := strconv.ParseUint(splits[0], 16, 64)
+	if err != nil {
+		return 0, ""
+	}
+	return ns, splits[1]
 }
 
 func ParseNamespaceBytes(attr string) ([]byte, string) {
 	splits := strings.SplitN(attr, NsSeparator, 2)
 	ns := make([]byte, 8)
-	binary.BigEndian.PutUint64(ns, strToUint(splits[0]))
+	if len(splits) < 2 || splits[0] == "" {
+		return ns, ""
+	}
+	nsUint, err := strconv.ParseUint(splits[0], 16, 64)
+	if err != nil {
+		return ns, ""
+	}
+	binary.BigEndian.PutUint64(ns, nsUint)
 	return ns, splits[1]
 }
 
 // ParseAttr returns the attr from the given value.
 func ParseAttr(attr string) string {
-	return strings.SplitN(attr, NsSeparator, 2)[1]
+	splits := strings.SplitN(attr, NsSeparator, 2)
+	if len(splits) < 2 {
+		return ""
+	}
+	return splits[1]
 }
 
 // ParseNamespace returns the namespace from the given value.
 func ParseNamespace(attr string) uint64 {
-	return strToUint(strings.SplitN(attr, NsSeparator, 2)[0])
+	splits := strings.SplitN(attr, NsSeparator, 2)
+	if len(splits) == 0 || splits[0] == "" {
+		return 0
+	}
+	ns, err := strconv.ParseUint(splits[0], 16, 64)
+	if err != nil {
+		return 0
+	}
+	return ns
 }
 
 func ParseAttrList(attrs []string) []string {
@@ -133,8 +159,11 @@ func uintToStr(ns uint64) string {
 }
 
 func IsReverseAttr(attr string) bool {
-	pred := strings.SplitN(attr, NsSeparator, 2)[1]
-	return pred[0] == '~'
+	splits := strings.SplitN(attr, NsSeparator, 2)
+	if len(splits) < 2 || len(splits[1]) == 0 {
+		return false
+	}
+	return splits[1][0] == '~'
 }
 
 func writeAttr(buf []byte, attr string) []byte {
