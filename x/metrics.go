@@ -463,6 +463,10 @@ func init() {
 
 	CheckfNoTrace(view.Register(allViews...))
 
+	ostats.Record(ctx, ActiveMutations.M(0))
+	ostats.Record(ctx, PendingQueries.M(0))
+	ostats.Record(ctx, PendingProposals.M(0))
+
 	promRegistry := prometheus.NewRegistry()
 	promRegistry.MustRegister(NewBadgerCollector())
 	promRegistry.MustRegister(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(
