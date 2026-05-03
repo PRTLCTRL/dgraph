@@ -1462,6 +1462,33 @@ func rewriteObject(
 									interfaceTyp.Name()))
 								return nil, "", retErrors
 							}
+						} else if mutationType == UpdateWithSet {
+							// For update mutations at top level, we need to check if the XID exists.
+							// If it does, we can't determine at rewriting time whether it belongs to  
+							// the same node being updated or a different node. We only error if:
+							// 1. Multiple nodes exist for the same XID (multipleNodesForSameID), OR
+							// 2. The XID exists in a different type (interface case)
+							// Otherwise, we allow the mutation to proceed and let runtime validation
+							// (in mutation.go) catch any issues with multiple nodes being updated.
+							if multipleNodesForSameID {
+								if queryAuthSelector(typ) == nil {
+									retErrors = append(retErrors, existenceError)
+								} else {
+									retErrors = append(retErrors, x.GqlErrorf("GraphQL debug: %v", existenceError.Error()))
+								}
+								return nil, "", retErrors
+							}
+							if !typUidExist {
+								// XID doesn't exist in the correct type but exists in interface type
+								retErrors = append(retErrors, xidErrorForInterfaceType(typ, xidString, xid,
+									interfaceTyp.Name()))
+								return nil, upsertVar, retErrors
+							}
+							// XID exists in the correct type. For update mutations, this may be acceptable
+							// if it belongs to the node being updated. We can't verify this at rewriting time,
+							// so we continue and let the runtime check handle it. However, we won't treat this
+							// as a new node creation - we'll use it as part of the update to existing node(s).
+							// Don't add to xidVariables to avoid creating a new node.
 						} else {
 							// We return an error as we are at top level of non-upsert mutation and the XID exists.
 							// We need to conceal the error because we might be leaking information to the user if it
