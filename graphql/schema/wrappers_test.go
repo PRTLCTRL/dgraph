@@ -1106,6 +1106,7 @@ func TestParseSecrets(t *testing.T) {
 		expectedSecrets        map[string]string
 		expectedAuthHeader     string
 		expectedAllowedOrigins []string
+		expectedAllowedHeaders []string
 		err                    error
 	}{
 		{"should be able to parse secrets",
@@ -1121,6 +1122,7 @@ func TestParseSecrets(t *testing.T) {
 			map[string]string{"GITHUB_API_TOKEN": "some-super-secret-token",
 				"STRIPE_API_KEY": "stripe-api-key-value"},
 			"",
+			nil,
 			nil,
 			nil,
 		},
@@ -1141,6 +1143,7 @@ func TestParseSecrets(t *testing.T) {
 			"",
 			nil,
 			nil,
+			nil,
 		},
 		{
 			"should throw an error if the secret is not in the correct format",
@@ -1154,6 +1157,7 @@ func TestParseSecrets(t *testing.T) {
 		`,
 			nil,
 			"",
+			nil,
 			nil,
 			errors.New("incorrect format for specifying Dgraph secret found for " +
 				"comment: `# Dgraph.Secret RANDOM_TOKEN`, it should " +
@@ -1176,6 +1180,7 @@ func TestParseSecrets(t *testing.T) {
 			"X-Test-Dgraph",
 			nil,
 			nil,
+			nil,
 		},
 		{
 			"Dgraph.Authorization old format error",
@@ -1186,11 +1191,12 @@ func TestParseSecrets(t *testing.T) {
 			}
 
 			# Dgraph.Secret  "GITHUB_API_TOKEN"   "some-super-secret-token"
-			# Dgraph.Authorization X-Test-Dgraph https://dgraph.io/jwt/claims "key"
-			# Dgraph.Secret STRIPE_API_KEY "stripe-api-key-value"
-			`,
+		# Dgraph.Authorization X-Test-Dgraph https://dgraph.io/jwt/claims "key"
+		# Dgraph.Secret STRIPE_API_KEY "stripe-api-key-value"
+		`,
 			nil,
 			"",
+			nil,
 			nil,
 			errors.New("input: Invalid `Dgraph.Authorization` format: # Dgraph.Authorization X-Test-Dgraph " +
 				"https://dgraph.io/jwt/claims \"key\""),
@@ -1203,11 +1209,12 @@ func TestParseSecrets(t *testing.T) {
 				name: String!
 			}
 
-			# Dgraph.Authorization {"VerificationKey":"secretkey","Header":"X-Test-Auth","Namespace":"https://xyz.io/jwt/claims","Algo":"HS256"}
-			# Dgraph.Authorization {"VerificationKey":"secretkey","Header":"X-Test-Auth","Namespace":"https://xyz.io/jwt/claims","Algo":"HS256"}
-			`,
+		# Dgraph.Authorization {"VerificationKey":"secretkey","Header":"X-Test-Auth","Namespace":"https://xyz.io/jwt/claims","Algo":"HS256"}
+		# Dgraph.Authorization {"VerificationKey":"secretkey","Header":"X-Test-Auth","Namespace":"https://xyz.io/jwt/claims","Algo":"HS256"}
+		`,
 			nil,
 			"",
+			nil,
 			nil,
 			errors.New(`Dgraph.Authorization should be only be specified once in a schema` +
 				`, found second mention: # Dgraph.Authorization {"VerificationKey":"secretkey","Header":"X-Test-Auth","Namespace":"https://xyz.io/jwt/claims","Algo":"HS256"}`),
@@ -1220,10 +1227,11 @@ func TestParseSecrets(t *testing.T) {
 				name: String!
 			}
 
-			# Dgraph.Authorization {}
-			`,
+		# Dgraph.Authorization {}
+		`,
 			nil,
 			"",
+			nil,
 			nil,
 			errors.New("required field missing in Dgraph.Authorization: " +
 				"`Verification key`/`JWKUrl`/`JWKUrls` `Algo` `Header` `Namespace`"),
@@ -1242,6 +1250,7 @@ func TestParseSecrets(t *testing.T) {
 			"X-Test-Auth",
 			nil,
 			nil,
+			nil,
 		},
 		{
 			"Valid Dgraph.Authorization with audience field",
@@ -1257,6 +1266,7 @@ func TestParseSecrets(t *testing.T) {
 			"X-Test-Auth",
 			nil,
 			nil,
+			nil,
 		},
 		{
 			"Valid Dgraph.Authorization without audience field",
@@ -1270,6 +1280,7 @@ func TestParseSecrets(t *testing.T) {
 			`,
 			map[string]string{},
 			"X-Test-Auth",
+			nil,
 			nil,
 			nil,
 		},
@@ -1289,6 +1300,7 @@ func TestParseSecrets(t *testing.T) {
 			"X-Test-Auth",
 			[]string{"https://dgraph.io"},
 			nil,
+			nil,
 		},
 		{
 			"should parse multiple Dgraph.Allow-Origin correctly",
@@ -1305,6 +1317,7 @@ func TestParseSecrets(t *testing.T) {
 			"",
 			[]string{"https://dgraph.io", "https://developer.mozilla.org"},
 			nil,
+			nil,
 		},
 		{
 			"should throw error if Dgraph.Allow-Origin has incorrect format",
@@ -1314,14 +1327,70 @@ func TestParseSecrets(t *testing.T) {
 				name: String!
 			}
 
-			# Dgraph.Allow-Origin 1"https://dgraph.io"
-			`,
+		# Dgraph.Allow-Origin 1"https://dgraph.io"
+		`,
 			map[string]string{},
 			"",
+			nil,
 			nil,
 			errors.New("incorrect format for specifying Dgraph.Allow-Origin found for " +
 				"comment: `# Dgraph.Allow-Origin 1\"https://dgraph.io\"`, it should " +
 				"be `# Dgraph.Allow-Origin \"http://example.com\"`"),
+		},
+		{
+			"should parse Dgraph.Allow-Headers correctly",
+			`
+			type User {
+				id: ID!
+				name: String!
+			}
+
+			# Dgraph.Allow-Headers "baggage"
+			# Dgraph.Allow-Headers "sentry-trace"
+			`,
+			map[string]string{},
+			"",
+			nil,
+			[]string{"baggage", "sentry-trace"},
+			nil,
+		},
+		{
+			"should parse Dgraph.Allow-Headers with other directives",
+			`
+			type User {
+				id: ID!
+				name: String!
+			}
+
+			# Dgraph.Authorization {"VerificationKey":"secretkey","Header":"X-Test-Auth","Namespace":"https://xyz.io/jwt/claims","Algo":"HS256"}
+			# Dgraph.Allow-Origin "https://dgraph.io"
+			# Dgraph.Allow-Headers "baggage"
+			# Dgraph.Allow-Headers "sentry-trace"
+			# Dgraph.Secret GITHUB_API_TOKEN "some-super-secret-token"
+			`,
+			map[string]string{"GITHUB_API_TOKEN": "some-super-secret-token"},
+			"X-Test-Auth",
+			[]string{"https://dgraph.io"},
+			[]string{"baggage", "sentry-trace"},
+			nil,
+		},
+		{
+			"should throw error if Dgraph.Allow-Headers has incorrect format",
+			`
+			type User {
+				id: ID!
+				name: String!
+			}
+
+			# Dgraph.Allow-Headers baggage
+			`,
+			map[string]string{},
+			"",
+			nil,
+			nil,
+			errors.New("incorrect format for specifying Dgraph.Allow-Headers found for " +
+				"comment: `# Dgraph.Allow-Headers baggage`, it should " +
+				"be `# Dgraph.Allow-Headers \"Header-Name\"`"),
 		},
 	}
 	for _, test := range tcases {
@@ -1339,6 +1408,10 @@ func TestParseSecrets(t *testing.T) {
 			require.Len(t, meta.allowedCorsOrigins, len(test.expectedAllowedOrigins))
 			for _, k := range test.expectedAllowedOrigins {
 				require.True(t, meta.allowedCorsOrigins[k])
+			}
+			require.Len(t, meta.extraAllowedHeaders, len(test.expectedAllowedHeaders))
+			for i, h := range test.expectedAllowedHeaders {
+				require.Equal(t, h, meta.extraAllowedHeaders[i])
 			}
 			if test.expectedAuthHeader != "" {
 				require.NotNil(t, meta.authMeta)

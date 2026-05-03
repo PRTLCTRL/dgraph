@@ -422,6 +422,33 @@ func TestCORS(t *testing.T) {
 	# Dgraph.Authorization  {"VerificationKey":"secret","Header":"X-Test-Dgraph","Namespace":"https://dgraph.io/jwt/claims","Algo":"HS256"}
 	`, "https://play.dgraph.io", "https://play.dgraph.io",
 		strings.Join([]string{x.AccessControlAllowedHeaders, "Test-CORS", "X-Test-Dgraph"}, ","))
+
+	// Dgraph.Allow-Headers should add custom headers to allowed CORS headers
+	testCORS(t, `
+	type TestCORS {
+		name: String
+	}
+	# Dgraph.Allow-Headers "baggage"
+	# Dgraph.Allow-Headers "sentry-trace"
+	`, "", "*", strings.Join([]string{x.AccessControlAllowedHeaders, "baggage", "sentry-trace"}, ","))
+
+	// Dgraph.Allow-Headers should work with forwardHeaders and auth
+	testCORS(t, `
+	type TestCORS {
+		id: ID!
+		name: String
+		cf: String @custom(http:{
+			url: "https://play.dgraph.io",
+			method: GET,
+			forwardHeaders: ["Test-CORS"]
+		})
+	}
+	# Dgraph.Allow-Origin "https://play.dgraph.io"
+	# Dgraph.Allow-Headers "baggage"
+	# Dgraph.Allow-Headers "sentry-trace"
+	# Dgraph.Authorization  {"VerificationKey":"secret","Header":"X-Test-Dgraph","Namespace":"https://dgraph.io/jwt/claims","Algo":"HS256"}
+	`, "https://play.dgraph.io", "https://play.dgraph.io",
+		strings.Join([]string{x.AccessControlAllowedHeaders, "Test-CORS", "X-Test-Dgraph", "baggage", "sentry-trace"}, ","))
 }
 
 func testCORS(t *testing.T, schema, reqOrigin, expectedAllowedOrigin,
