@@ -174,6 +174,9 @@ type metaInfo struct {
 	// The header for Dgraph.Authorization is also part of this.
 	// They are returned to the client as part of Access-Control-Allow-Headers.
 	extraCorsHeaders []string
+	// extraAllowedHeaders are additional CORS headers extracted from # Dgraph.Allow-Headers.
+	// They are returned to the client as part of Access-Control-Allow-Headers.
+	extraAllowedHeaders []string
 	// allowedCorsOrigins stores allowed CORS origins extracted from # Dgraph.Allow-Origin.
 	// They are returned to the client as part of Access-Control-Allow-Origin.
 	allowedCorsOrigins map[string]bool
@@ -183,7 +186,9 @@ type metaInfo struct {
 }
 
 func (m *metaInfo) AllowedCorsHeaders() string {
-	return strings.Join(append([]string{x.AccessControlAllowedHeaders}, m.extraCorsHeaders...), ",")
+	headers := append([]string{x.AccessControlAllowedHeaders}, m.extraCorsHeaders...)
+	headers = append(headers, m.extraAllowedHeaders...)
+	return strings.Join(headers, ",")
 }
 
 func (m *metaInfo) AllowedCorsOrigins() map[string]bool {
@@ -230,6 +235,23 @@ func parseMetaInfo(sch string) (*metaInfo, error) {
 						"Allow-Origin \"http://example.com\"`", text)
 				}
 				schMetaInfo.allowedCorsOrigins[allowedOrigin] = true
+				continue
+			}
+
+			if strings.HasPrefix(header, "Dgraph.Allow-Headers") {
+				parts := strings.Fields(text)
+				if len(parts) != 3 {
+					return nil, errors.Errorf("incorrect format for specifying Dgraph.Allow-Headers"+
+						" found for comment: `%s`, it should be `# Dgraph."+
+						"Allow-Headers \"Header-Name\"`", text)
+				}
+				var allowedHeader string
+				if err = json.Unmarshal([]byte(parts[2]), &allowedHeader); err != nil {
+					return nil, errors.Errorf("incorrect format for specifying Dgraph.Allow-Headers"+
+						" found for comment: `%s`, it should be `# Dgraph."+
+						"Allow-Headers \"Header-Name\"`", text)
+				}
+				schMetaInfo.extraAllowedHeaders = append(schMetaInfo.extraAllowedHeaders, allowedHeader)
 				continue
 			}
 
