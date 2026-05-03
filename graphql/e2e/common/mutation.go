@@ -6366,6 +6366,7 @@ func xidUpdateAndNullableTests(t *testing.T) {
 		name      string
 		query     string
 		variables string
+		expected  string
 		error     string
 	}{
 		{
@@ -6561,6 +6562,42 @@ func xidUpdateAndNullableTests(t *testing.T) {
 				" payload because id ABC already exists for field name inside type Employer",
 		},
 		{
+			name: "update mutation with unchanged @id field should update other fields",
+			query: `mutation update($patch: UpdateEmployerInput!) {
+                    	updateEmployer(input: $patch) {
+                    		employer {
+                    			name
+                    			company
+                    		}
+                    	}
+                    }`,
+			variables: `{
+                    "patch": {
+                        "filter": {
+                            "name": {
+                                "in": [
+                                    "ABC"
+                                ]
+                            }
+                        },
+                        "set": {
+                            "name": "ABC",
+                            "company": "ABC Technologies"
+                        }
+                    }
+                }`,
+			expected: `{
+                    "updateEmployer": {
+                        "employer": [
+                            {
+                                "name": "ABC",
+                                "company": "ABC Technologies"
+                            }
+                        ]
+                    }
+                }`,
+		},
+		{
 			name: "updating root @id fields and also create a nested  link to nested object",
 			query: `mutation update($patch: UpdateEmployerInput!) {
                     	updateEmployer(input: $patch) {
@@ -6608,6 +6645,9 @@ func xidUpdateAndNullableTests(t *testing.T) {
 				require.Equal(t, tcase.error, resp.Errors[0].Error())
 			} else {
 				RequireNoGQLErrors(t, resp)
+				if tcase.expected != "" {
+					require.JSONEq(t, tcase.expected, string(resp.Data))
+				}
 			}
 
 		})
