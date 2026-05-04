@@ -304,3 +304,71 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+// TestAddMapChildReplacement tests that AddMapChild replaces nodes with the same
+// attribute instead of merging them, to prevent duplicate JSON fields.
+// This is a regression test for https://github.com/dgraph-io/dgraph/issues/9422
+func TestAddMapChildReplacement(t *testing.T) {
+	enc := newEncoder()
+
+	// Create a parent node
+	parent := enc.newNode(enc.idForAttr("parent"))
+
+	// Create first child node with attribute "like" and add some nested data
+	child1 := enc.newNode(enc.idForAttr("like"))
+	uidNode1, err := enc.makeUidNode(enc.uidAttr, 0x2)
+	require.NoError(t, err)
+	enc.addChildren(child1, uidNode1)
+	fruitVal1 := types.Val{Tid: types.StringID, Value: "apple"}
+	fruitBytes1, err := valToBytes(fruitVal1)
+	require.NoError(t, err)
+	fruitNode1, err := enc.makeScalarNode(enc.idForAttr("fruit"), fruitBytes1, false)
+	require.NoError(t, err)
+	enc.addChildren(child1, fruitNode1)
+
+	// Add first child to parent using AddMapChild
+	enc.AddMapChild(parent, child1)
+
+	// Create second child node with the same attribute "like" but different nested data
+	child2 := enc.newNode(enc.idForAttr("like"))
+	uidNode2, err := enc.makeUidNode(enc.uidAttr, 0x3)
+	require.NoError(t, err)
+	enc.addChildren(child2, uidNode2)
+	fruitVal2 := types.Val{Tid: types.StringID, Value: "banana"}
+	fruitBytes2, err := valToBytes(fruitVal2)
+	require.NoError(t, err)
+	fruitNode2, err := enc.makeScalarNode(enc.idForAttr("fruit"), fruitBytes2, false)
+	require.NoError(t, err)
+	enc.addChildren(child2, fruitNode2)
+
+	// Add second child to parent using AddMapChild - should replace first child
+	enc.AddMapChild(parent, child2)
+
+	// Fix the order of children
+	enc.fixOrder(parent)
+
+	// Encode to JSON
+	enc.buf.Reset()
+	err = enc.encode(parent)
+	require.NoError(t, err)
+
+	jsonOutput := enc.buf.String()
+
+	// Parse the JSON to verify structure
+	var result map[string]interface{}
+	err = json.Unmarshal([]byte(jsonOutput), &result)
+	require.NoError(t, err)
+
+	// Verify that "like" contains only the second child's data (banana)
+	require.Contains(t, result, "like")
+	likeObj := result["like"].(map[string]interface{})
+
+	// Should have only one uid and one fruit value (banana, not apple)
+	require.Contains(t, likeObj, "uid")
+	require.Contains(t, likeObj, "fruit")
+	require.Equal(t, "banana", likeObj["fruit"])
+	require.Equal(t, "0x3", likeObj["uid"])
+
+	// Ensure there are no duplicate keys by checking the raw JSON doesn't contain "apple"
+	require.NotContains(t, jsonOutput, "apple", "First child's data should be replaced, not merged")
+}
