@@ -304,3 +304,44 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacement(t *testing.T) {
+	enc := newEncoder()
+	root := enc.newNode(enc.idForAttr("person"))
+
+	likeAttr := enc.idForAttr("like")
+	uidAttr := enc.uidAttr
+
+	apple := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(apple, 0x2, uidAttr))
+	enc.AddMapChild(root, apple)
+
+	banana := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(banana, 0x3, uidAttr))
+	enc.AddMapChild(root, banana)
+
+	enc.fixOrder(root)
+	require.NoError(t, enc.encode(root))
+
+	result := enc.buf.String()
+
+	require.NotContains(t, result, "0x2", "Result should not contain the replaced UID '0x2'")
+	require.Contains(t, result, "0x3", "Result should contain the new UID '0x3'")
+
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(result), &decoded), "Output should be valid JSON")
+
+	like := decoded["like"].(map[string]interface{})
+	require.Equal(t, "0x3", like["uid"], "Should have banana's UID (0x3)")
+
+	_, hasMultipleUID := like["uid"]
+	require.True(t, hasMultipleUID, "Should have only one uid field")
+
+	uidCount := 0
+	for k := range like {
+		if k == "uid" {
+			uidCount++
+		}
+	}
+	require.Equal(t, 1, uidCount, "Should have exactly one uid field, not duplicates")
+}
