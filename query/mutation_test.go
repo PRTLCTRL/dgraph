@@ -101,3 +101,91 @@ func TestUnreservedPredicateForDeletion(t *testing.T) {
 	require.NoError(t, addTriplesToCluster(triple))
 	deleteTriplesInCluster(triple)
 }
+
+func TestMultipleMutationsNoDuplicateJSONFields(t *testing.T) {
+	ctx := context.Background()
+
+	schema := `
+		name: string @index(exact) .
+		like: uid @reverse .
+		fruit: string @index(exact) .
+
+		type Person {
+			name
+			like
+		}
+		type Fruit {
+			fruit
+		}
+	`
+	setSchema(schema)
+
+	mutation := &api.Mutation{
+		SetNquads: []byte(`
+			_:person <name> "Tom" .
+			_:person <dgraph.type> "Person" .
+			_:apple <fruit> "apple" .
+			_:apple <dgraph.type> "Fruit" .
+			_:banana <fruit> "banana" .
+			_:banana <dgraph.type> "Fruit" .
+			_:person <like> _:apple .
+		`),
+		CommitNow: true,
+	}
+	_, err := client.NewTxn().Mutate(ctx, mutation)
+	require.NoError(t, err)
+
+	dql := `{
+		person as var(func: eq(name, "Tom"))
+		banana as var(func: eq(fruit, "banana"))
+	}`
+
+	mu1 := &api.Mutation{
+		DelNquads: []byte(`uid(person) <like> * .`),
+	}
+	mu2 := &api.Mutation{
+		SetNquads: []byte(`uid(person) <like> uid(banana) .`),
+	}
+
+	req := &api.Request{
+		Query:     dql,
+		Mutations: []*api.Mutation{mu1, mu2},
+		CommitNow: true,
+	}
+
+	txn := client.NewTxn()
+	resp, err := txn.Do(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	queryDQL := `{
+		q(func: eq(name, "Tom")) {
+			uid
+			like { uid fruit }
+		}
+	}`
+
+	queryResp, err := client.NewTxn().Query(ctx, queryDQL)
+	require.NoError(t, err)
+
+	var result map[string]interface{}
+	err = json.Unmarshal(queryResp.Json, &result)
+	require.NoError(t, err)
+
+	q, ok := result["q"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, q, 1)
+
+	person := q[0].(map[string]interface{})
+	like, ok := person["like"].(map[string]interface{})
+	require.True(t, ok, "like should be a single object, not an array")
+
+	fruit, ok := like["fruit"].(string)
+	require.True(t, ok)
+	require.Equal(t, "banana", fruit, "should only have the new edge (banana), not the old one (apple)")
+
+	jsonBytes := queryResp.Json
+	var jsonMap map[string]interface{}
+	err = json.Unmarshal(jsonBytes, &jsonMap)
+	require.NoError(t, err, "JSON should be valid without duplicate keys")
+}

@@ -1426,7 +1426,16 @@ func (sg *SubGraph) preTraverse(enc *encoder, uid uint64, dst fastJsonNode) erro
 			// We create as many predicate entity children as the length of uids for
 			// this predicate.
 			ul := pc.uidMatrix[idx]
-			for childIdx, childUID := range ul.Uids {
+			
+			// For non-list predicates, only process the last UID to avoid duplicate
+			// JSON fields when multiple mutations (delete + set) occur in the same transaction.
+			startIdx := 0
+			if !pc.List && len(ul.Uids) > 1 {
+				startIdx = len(ul.Uids) - 1
+			}
+			
+			for childIdx := startIdx; childIdx < len(ul.Uids); childIdx++ {
+				childUID := ul.Uids[childIdx]
 				if fieldName == "" || (invalidUids != nil && invalidUids[childUID]) {
 					continue
 				}
