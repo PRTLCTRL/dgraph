@@ -721,7 +721,9 @@ func validateCondValue(cond string) error {
 	}
 
 	lower := strings.ToLower(cond)
-	if !strings.HasPrefix(lower, "@if(") && !strings.HasPrefix(lower, "@filter(") {
+	hasIfPrefix := strings.HasPrefix(lower, "@if(") || strings.HasPrefix(lower, "@if ")
+	hasFilterPrefix := strings.HasPrefix(lower, "@filter(") || strings.HasPrefix(lower, "@filter ")
+	if !hasIfPrefix && !hasFilterPrefix {
 		return errors.Errorf("invalid cond value: must start with @if( or @filter(")
 	}
 
