@@ -128,7 +128,8 @@ const (
 
 	AccessControlAllowedHeaders = "X-Dgraph-AccessToken, X-Dgraph-AuthToken, " +
 		"Content-Type, Content-Length, Accept-Encoding, Cache-Control, " +
-		"X-CSRF-Token, X-Auth-Token, X-Requested-With"
+		"X-CSRF-Token, X-Auth-Token, X-Requested-With, " +
+		"baggage, sentry-trace"
 	DgraphCostHeader = "Dgraph-TouchedUids"
 
 	ManifestVersion = 2105
