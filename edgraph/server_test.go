@@ -388,6 +388,10 @@ func TestValidateCondValue(t *testing.T) {
 		`@if(not(eq(len(v), 0)))`,
 		`@if(eq(name, "has (parens) inside"))`,
 		`@filter(eq(len(v), 0))`,
+		`@if (eq(len(v), 0))`,
+		`@if  (eq(len(v), 0))`,
+		`@filter (eq(len(v), 0))`,
+		` @if ( NOT eq(len(RoutesId), 0) ) `,
 	}
 	for _, c := range valid {
 		require.NoError(t, validateCondValue(c), "expected valid: %q", c)
@@ -430,6 +434,9 @@ func TestValidateValObjectId(t *testing.T) {
 		"val(queryVariable)",
 		"val(my_var_123)",
 		"val(Amt)",
+		" val(v)",
+		"val(v) ",
+		" val(v) ",
 	}
 	for _, v := range valid {
 		require.NoError(t, validateValObjectId(v), "expected valid: %q", v)
@@ -454,6 +461,9 @@ func TestValidateLangTag(t *testing.T) {
 		"fr",
 		"zh-Hans",
 		"en-US",
+		" en",
+		"en ",
+		" en ",
 	}
 	for _, v := range valid {
 		require.NoError(t, validateLangTag(v), "expected valid: %q", v)
