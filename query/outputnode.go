@@ -498,19 +498,43 @@ func (enc *encoder) AddListValue(fj fastJsonNode, attr uint16, v types.Val, list
 
 func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
 	var childNode fastJsonNode
+	var prevChild fastJsonNode
 	child := enc.children(fj)
 	for child != nil {
 		if enc.getAttr(child) == enc.getAttr(val) {
 			childNode = child
 			break
 		}
+		prevChild = child
 		child = child.next
 	}
 
 	if childNode == nil {
 		enc.addChildren(fj, val)
 	} else {
-		enc.addChildren(childNode, enc.children(val))
+		// Check if this is a facetsParent node. Facets need to accumulate multiple values,
+		// so we merge children for facets.
+		if enc.getFacetsParent(val) {
+			enc.addChildren(childNode, enc.children(val))
+			return
+		}
+
+		// For non-facet nodes (like UID edges), having multiple children with the same
+		// attribute indicates a bug where the posting list returned multiple UIDs for
+		// a non-list predicate. This can happen when delete and set mutations occur
+		// in the same transaction.
+		//
+		// Instead of merging (which creates invalid JSON with duplicate keys), we
+		// replace the old child with the new one, keeping only the latest value.
+		if prevChild == nil {
+			// childNode is the first child
+			fj.child = val
+			val.next = childNode.next
+		} else {
+			// childNode is not the first
+			prevChild.next = val
+			val.next = childNode.next
+		}
 	}
 }
 
