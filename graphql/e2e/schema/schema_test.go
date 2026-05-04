@@ -458,6 +458,30 @@ func testCORS(t *testing.T, schema, reqOrigin, expectedAllowedOrigin,
 	testutil.CompareJSON(t, `{"queryTestCORS":[]}`, string(gqlRes.Data))
 }
 
+func TestSentryCORSHeaders(t *testing.T) {
+	schema := `
+	type TestCORS {
+		name: String
+	}`
+	common.SafelyUpdateGQLSchema(t, groupOneHTTP, schema, nil)
+
+	params := &common.GraphQLParams{Query: `query { queryTestCORS { name } }`}
+	req, err := params.CreateGQLPost(groupOneGraphQLServer)
+	require.NoError(t, err)
+
+	req.Header.Set("baggage", "sentry-environment=production")
+	req.Header.Set("sentry-trace", "d4cda95b652f4a1592b449d5929fda1b-6e0c63257de34c92-1")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	allowedHeaders := resp.Header.Get("Access-Control-Allow-Headers")
+	require.Contains(t, allowedHeaders, "baggage")
+	require.Contains(t, allowedHeaders, "sentry-trace")
+}
+
 func TestGQLSchemaValidate(t *testing.T) {
 	common.SafelyDropAll(t)
 
