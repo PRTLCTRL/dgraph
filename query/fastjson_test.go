@@ -139,4 +139,34 @@ func TestEncode(t *testing.T) {
 		}
 		`, enc.buf.String())
 	})
+
+	t.Run("with singular uid predicate and multiple values (simulating delete+set)", func(t *testing.T) {
+		root := enc.newNode(0)
+
+		like1 := enc.newNode(enc.idForAttr("like"))
+		uid1, err := enc.makeUidNode(enc.uidAttr, 0x2)
+		require.NoError(t, err)
+		require.NoError(t, enc.AddValue(like1, enc.idForAttr("fruit"), types.Val{Tid: types.StringID, Value: "apple"}))
+		enc.addChildren(like1, uid1)
+
+		like2 := enc.newNode(enc.idForAttr("like"))
+		uid2, err := enc.makeUidNode(enc.uidAttr, 0x3)
+		require.NoError(t, err)
+		require.NoError(t, enc.AddValue(like2, enc.idForAttr("fruit"), types.Val{Tid: types.StringID, Value: "banana"}))
+		enc.addChildren(like2, uid2)
+
+		enc.AddMapChild(root, like1)
+		enc.AddMapChild(root, like2)
+
+		enc.buf.Reset()
+		require.NoError(t, enc.encode(root))
+		testutil.CompareJSON(t, `
+		{
+			"like":{
+				"uid":"0x3",
+				"fruit":"banana"
+			}
+		}
+		`, enc.buf.String())
+	})
 }
