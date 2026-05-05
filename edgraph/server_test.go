@@ -388,6 +388,10 @@ func TestValidateCondValue(t *testing.T) {
 		`@if(not(eq(len(v), 0)))`,
 		`@if(eq(name, "has (parens) inside"))`,
 		`@filter(eq(len(v), 0))`,
+		`@if ( NOT eq(len(RoutesId), 0) )`,
+		`@if  (eq(name, "test"))`,
+		`@filter ( eq(len(v), 0) )`,
+		`@filter  (eq(name, "Alice"))`,
 	}
 	for _, c := range valid {
 		require.NoError(t, validateCondValue(c), "expected valid: %q", c)
