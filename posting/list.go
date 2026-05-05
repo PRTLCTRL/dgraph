@@ -1723,7 +1723,12 @@ func (l *List) calculateUids() error {
 	}
 	res := make([]uint64, 0, l.ApproxLen())
 
-	err := l.iterate(l.mutationMap.committedUidsTime, 0, func(p *pb.Posting) error {
+	readTs := l.mutationMap.readTs
+	if readTs == 0 {
+		readTs = l.mutationMap.committedUidsTime
+	}
+
+	err := l.iterate(readTs, 0, func(p *pb.Posting) error {
 		if p.PostingType == pb.Posting_REF {
 			res = append(res, p.Uid)
 		}
