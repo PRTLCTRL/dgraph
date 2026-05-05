@@ -1122,6 +1122,49 @@ func (l *List) iterate(readTs uint64, afterUid uint64, f func(obj *pb.Posting) e
 		return errors.Errorf("readTs: %d less than minTs: %d for key: %q", readTs, l.minTs, l.key)
 	}
 
+	// Filter out mutable postings that are invalidated by a delete-all in the same transaction.
+	// When a delete-all is present in mutable postings, it should delete all previous postings
+	// that have a timestamp <= delete-all timestamp.
+	var filteredMposts []*pb.Posting
+	deleteAllTs := uint64(0)
+	
+	// First pass: find the latest delete-all marker and its timestamp
+	for _, mp := range mposts {
+		if hasDeleteAll(mp) {
+			// Calculate effective timestamp for this delete-all
+			effectiveTs := mp.CommitTs
+			if effectiveTs == 0 {
+				effectiveTs = mp.StartTs
+			}
+			if effectiveTs > deleteAllTs {
+				deleteAllTs = effectiveTs
+			}
+		}
+	}
+	
+	// Second pass: filter out postings that should be deleted
+	for _, mp := range mposts {
+		if hasDeleteAll(mp) {
+			// Skip the delete-all marker itself from the results
+			continue
+		}
+		
+		// Calculate effective timestamp for this posting
+		effectiveTs := mp.CommitTs
+		if effectiveTs == 0 {
+			effectiveTs = mp.StartTs
+		}
+		
+		// If there's a delete-all at or after this posting's timestamp, skip this posting
+		if deleteAllTs > 0 && effectiveTs < deleteAllTs {
+			continue
+		}
+		
+		filteredMposts = append(filteredMposts, mp)
+	}
+	
+	mposts = filteredMposts
+
 	midx, mlen := 0, len(mposts)
 	if afterUid > 0 {
 		midx = sort.Search(mlen, func(idx int) bool {
