@@ -498,19 +498,46 @@ func (enc *encoder) AddListValue(fj fastJsonNode, attr uint16, v types.Val, list
 
 func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
 	var childNode fastJsonNode
+	var prevNode fastJsonNode
 	child := enc.children(fj)
 	for child != nil {
 		if enc.getAttr(child) == enc.getAttr(val) {
 			childNode = child
 			break
 		}
+		prevNode = child
 		child = child.next
 	}
 
 	if childNode == nil {
 		enc.addChildren(fj, val)
 	} else {
-		enc.addChildren(childNode, enc.children(val))
+		// For non-list predicates, if the child already exists and both the existing child
+		// and new value represent single UID nodes (both have a single uid child), we should
+		// replace the old child with the new one rather than merging their children.
+		// This handles the case where a non-list UID predicate is updated within a transaction
+		// (e.g., delete followed by set), preventing duplicate fields in JSON output.
+		valChildren := enc.children(val)
+		existingChildren := enc.children(childNode)
+		
+		// Check if both nodes represent single UID values (have exactly one uid child each)
+		shouldReplace := valChildren != nil && valChildren.next == nil && 
+			existingChildren != nil && existingChildren.next == nil &&
+			enc.getAttr(valChildren) == enc.uidAttr &&
+			enc.getAttr(existingChildren) == enc.uidAttr
+
+		if shouldReplace {
+			// Replace the entire child node with the new value
+			val.next = childNode.next
+			if prevNode == nil {
+				fj.child = val
+			} else {
+				prevNode.next = val
+			}
+		} else {
+			// For list predicates or other cases, merge children as before
+			enc.addChildren(childNode, valChildren)
+		}
 	}
 }
 
