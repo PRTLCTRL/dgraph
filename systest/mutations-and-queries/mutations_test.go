@@ -2932,3 +2932,79 @@ func (ssuite *SystestTestSuite) TestAddAndQueryZeroTimeValue() {
 		]
 	  }`, string(resp.Json))
 }
+
+func (ssuite *SystestTestSuite) TestMultipleMutationsDeleteAndSetSameEdge() {
+	t := ssuite.T()
+	gcli, cleanup, err := doGrpcLogin(ssuite)
+	defer cleanup()
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	op := &api.Operation{
+		Schema: `
+			name: string @index(exact) .
+			like: uid @reverse .
+			fruit: string @index(exact) .
+			type Person {
+				name
+				like
+			}
+			type Fruit {
+				fruit
+			}
+		`,
+	}
+	require.NoError(t, gcli.Alter(ctx, op))
+
+	_, err = gcli.NewTxn().Mutate(ctx, &api.Mutation{
+		CommitNow: true,
+		SetNquads: []byte(`
+			_:person <name> "Tom" .
+			_:person <dgraph.type> "Person" .
+			_:apple <fruit> "apple" .
+			_:apple <dgraph.type> "Fruit" .
+			_:banana <fruit> "banana" .
+			_:banana <dgraph.type> "Fruit" .
+			_:person <like> _:apple .
+		`),
+	})
+	require.NoError(t, err)
+
+	dql := `{
+		person as var(func: eq(name, "Tom"))
+		banana as var(func: eq(fruit, "banana"))
+	}`
+	mu1 := &api.Mutation{
+		DelNquads: []byte(`uid(person) <like> * .`),
+	}
+	mu2 := &api.Mutation{
+		SetNquads: []byte(`uid(person) <like> uid(banana) .`),
+	}
+	req := &api.Request{
+		Query:     dql,
+		Mutations: []*api.Mutation{mu1, mu2},
+		CommitNow: true,
+	}
+	txn := gcli.NewTxn()
+	response, err := txn.Do(ctx, req)
+	require.NoError(t, err)
+	t.Logf("Mutation response: %v", string(response.Json))
+
+	query := `{
+		q(func: eq(name, "Tom")) {
+			uid
+			like { uid fruit }
+		}
+	}`
+	queryResp, err := gcli.NewReadOnlyTxn().Query(ctx, query)
+	require.NoError(t, err)
+	t.Logf("Query response: %v", string(queryResp.Json))
+
+	dgraphapi.CompareJSON(`{
+		"q": [{
+			"like": {
+				"fruit": "banana"
+			}
+		}]
+	}`, string(queryResp.Json))
+}
