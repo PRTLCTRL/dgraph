@@ -137,6 +137,35 @@ func TestStringJsonMarshal(t *testing.T) {
 	}
 }
 
+func TestAddMapChildReplacesDuplicates(t *testing.T) {
+	enc := newEncoder()
+	parent := enc.newNode(enc.idForAttr("parent"))
+
+	firstChild := enc.newNode(enc.idForAttr("like"))
+	require.NoError(t, enc.SetUID(firstChild, 0x2, enc.uidAttr))
+
+	secondChild := enc.newNode(enc.idForAttr("like"))
+	require.NoError(t, enc.SetUID(secondChild, 0x3, enc.uidAttr))
+
+	enc.AddMapChild(parent, firstChild)
+	enc.AddMapChild(parent, secondChild)
+
+	child := enc.children(parent)
+	require.NotNil(t, child)
+	require.Equal(t, enc.idForAttr("like"), enc.getAttr(child))
+
+	childOfChild := enc.children(child)
+	require.NotNil(t, childOfChild)
+	require.Equal(t, enc.uidAttr, enc.getAttr(childOfChild))
+
+	uidVal, err := enc.getScalarVal(childOfChild)
+	require.NoError(t, err)
+	require.Contains(t, string(uidVal), "0x3")
+
+	require.Nil(t, childOfChild.next)
+	require.Nil(t, child.next)
+}
+
 func TestFastJsonNode(t *testing.T) {
 	attrId := uint16(20)
 	scalarVal := bytes.Repeat([]byte("a"), 160)
