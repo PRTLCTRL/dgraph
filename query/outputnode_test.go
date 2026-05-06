@@ -304,3 +304,51 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildNoDuplicateKeys(t *testing.T) {
+	enc := newEncoder()
+	root := enc.newNode(enc.idForAttr("root"))
+
+	likeAttr := enc.idForAttr("like")
+	uidAttr := enc.idForAttr("uid")
+	fruitAttr := enc.idForAttr("fruit")
+
+	node1 := enc.newNode(likeAttr)
+	uidNode1, err := enc.makeUidNode(uidAttr, 0x2)
+	require.NoError(t, err)
+	enc.addChildren(node1, uidNode1)
+	fruitNode1, err := enc.makeScalarNode(fruitAttr, []byte(`"apple"`), false)
+	require.NoError(t, err)
+	enc.addChildren(node1, fruitNode1)
+
+	node2 := enc.newNode(likeAttr)
+	uidNode2, err := enc.makeUidNode(uidAttr, 0x3)
+	require.NoError(t, err)
+	enc.addChildren(node2, uidNode2)
+	fruitNode2, err := enc.makeScalarNode(fruitAttr, []byte(`"banana"`), false)
+	require.NoError(t, err)
+	enc.addChildren(node2, fruitNode2)
+
+	enc.AddMapChild(root, node1)
+	enc.AddMapChild(root, node2)
+
+	enc.fixOrder(root)
+
+	err = enc.encode(root)
+	require.NoError(t, err)
+
+	result := enc.buf.String()
+	t.Logf("Result: %s", result)
+
+	var jsonResult map[string]interface{}
+	err = json.Unmarshal([]byte(result), &jsonResult)
+	require.NoError(t, err, "Generated JSON should be valid")
+
+	like, ok := jsonResult["like"]
+	require.True(t, ok, "Result should contain 'like' field")
+
+	likeArray, isArray := like.([]interface{})
+	if isArray {
+		require.Len(t, likeArray, 2, "Should have 2 entries in the array")
+	}
+}

@@ -510,7 +510,12 @@ func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
 	if childNode == nil {
 		enc.addChildren(fj, val)
 	} else {
-		enc.addChildren(childNode, enc.children(val))
+		// When a child with the same attribute already exists, add val as a sibling
+		// instead of merging their children. This prevents duplicate keys in JSON
+		// for single-valued predicates (e.g., when delete + set mutations occur
+		// in the same transaction). The encode() function will properly handle
+		// multiple children with the same attribute by encoding them as an array.
+		enc.addChildren(fj, val)
 	}
 }
 
