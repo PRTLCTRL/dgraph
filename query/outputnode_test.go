@@ -304,3 +304,50 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacesExistingChild(t *testing.T) {
+	enc := newEncoder()
+	parent := enc.newNode(enc.idForAttr("parent"))
+
+	child1 := enc.newNode(enc.idForAttr("like"))
+	uid1, err := enc.makeUidNode(enc.uidAttr, 0x2)
+	require.NoError(t, err)
+	fruitAttr := enc.idForAttr("fruit")
+	fruitNode1, err := enc.makeScalarNode(fruitAttr, []byte(`"apple"`), false)
+	require.NoError(t, err)
+	enc.addChildren(child1, uid1)
+	enc.addChildren(child1, fruitNode1)
+
+	enc.AddMapChild(parent, child1)
+
+	child2 := enc.newNode(enc.idForAttr("like"))
+	uid2, err := enc.makeUidNode(enc.uidAttr, 0x3)
+	require.NoError(t, err)
+	fruitNode2, err := enc.makeScalarNode(fruitAttr, []byte(`"banana"`), false)
+	require.NoError(t, err)
+	enc.addChildren(child2, uid2)
+	enc.addChildren(child2, fruitNode2)
+
+	enc.AddMapChild(parent, child2)
+
+	enc.fixOrder(parent)
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(parent))
+
+	result := enc.buf.String()
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(result), &decoded))
+
+	like, ok := decoded["like"].(map[string]interface{})
+	require.True(t, ok, "like should be a map")
+
+	uidVal, hasUID := like["uid"]
+	require.True(t, hasUID, "like should have uid field")
+	require.Equal(t, "0x3", uidVal, "uid should be 0x3 (the replacement value)")
+
+	fruitVal, hasFruit := like["fruit"]
+	require.True(t, hasFruit, "like should have fruit field")
+	require.Equal(t, "banana", fruitVal, "fruit should be banana (the replacement value)")
+
+	require.Equal(t, 2, len(like), "like should have exactly 2 fields (uid and fruit), not duplicates")
+}
