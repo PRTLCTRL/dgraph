@@ -304,3 +304,38 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacement(t *testing.T) {
+	enc := newEncoder()
+	root := enc.newNode(enc.idForAttr("root"))
+
+	likeAttr := enc.idForAttr("like")
+
+	firstChild := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(firstChild, 0x2, enc.uidAttr))
+	fruitAttr := enc.idForAttr("fruit")
+	require.NoError(t, enc.AddValue(firstChild, fruitAttr, types.Val{Tid: types.StringID, Value: "apple"}))
+
+	enc.AddMapChild(root, firstChild)
+
+	secondChild := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(secondChild, 0x3, enc.uidAttr))
+	require.NoError(t, enc.AddValue(secondChild, fruitAttr, types.Val{Tid: types.StringID, Value: "banana"}))
+
+	enc.AddMapChild(root, secondChild)
+
+	enc.fixOrder(root)
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(root))
+
+	result := enc.buf.String()
+	var jsonResult map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(result), &jsonResult))
+
+	likeObj, ok := jsonResult["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object, not an array or duplicate keys")
+	require.Equal(t, "0x3", likeObj["uid"], "uid should be the second (replacement) value")
+	require.Equal(t, "banana", likeObj["fruit"], "fruit should be the second (replacement) value")
+
+	require.NotContains(t, result, "apple", "old value should not be present")
+}
