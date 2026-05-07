@@ -304,3 +304,45 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacesDuplicate(t *testing.T) {
+	enc := newEncoder()
+	parent := enc.newNode(enc.idForAttr("parent"))
+
+	child1 := enc.newNode(enc.idForAttr("like"))
+	uid1, err := enc.makeUidNode(enc.uidAttr, 0x2)
+	require.NoError(t, err)
+	enc.addChildren(child1, uid1)
+	require.NoError(t, enc.AddValue(child1, enc.idForAttr("fruit"),
+		types.Val{Tid: types.StringID, Value: "apple"}))
+
+	enc.AddMapChild(parent, child1)
+
+	child2 := enc.newNode(enc.idForAttr("like"))
+	uid2, err := enc.makeUidNode(enc.uidAttr, 0x3)
+	require.NoError(t, err)
+	enc.addChildren(child2, uid2)
+	require.NoError(t, enc.AddValue(child2, enc.idForAttr("fruit"),
+		types.Val{Tid: types.StringID, Value: "banana"}))
+
+	enc.AddMapChild(parent, child2)
+
+	enc.fixOrder(parent)
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(parent))
+
+	result := enc.buf.String()
+	require.Contains(t, result, "banana")
+	require.Contains(t, result, "0x3")
+	require.NotContains(t, result, "apple")
+	require.NotContains(t, result, "0x2")
+
+	var decoded map[string]interface{}
+	err = json.Unmarshal(enc.buf.Bytes(), &decoded)
+	require.NoError(t, err, "JSON should be valid")
+
+	like, ok := decoded["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object, not an array")
+	require.Equal(t, "banana", like["fruit"])
+	require.Equal(t, "0x3", like["uid"])
+}
