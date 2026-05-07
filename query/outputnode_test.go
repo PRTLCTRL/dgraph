@@ -304,3 +304,45 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacesDuplicate(t *testing.T) {
+	enc := newEncoder()
+	root := enc.newNode(enc.idForAttr("person"))
+
+	firstLike := enc.newNode(enc.idForAttr("like"))
+	require.NoError(t, enc.SetUID(firstLike, 0x2, enc.uidAttr))
+	require.NoError(t, enc.AddValue(firstLike, enc.idForAttr("fruit"), types.Val{Tid: types.StringID, Value: "apple"}))
+	enc.AddMapChild(root, firstLike)
+
+	secondLike := enc.newNode(enc.idForAttr("like"))
+	require.NoError(t, enc.SetUID(secondLike, 0x3, enc.uidAttr))
+	require.NoError(t, enc.AddValue(secondLike, enc.idForAttr("fruit"), types.Val{Tid: types.StringID, Value: "banana"}))
+	enc.AddMapChild(root, secondLike)
+
+	enc.fixOrder(root)
+
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(root))
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(enc.buf.Bytes(), &result))
+
+	likeObj, ok := result["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object")
+	
+	require.Equal(t, "0x3", likeObj["uid"], "uid should be from the second (latest) like")
+	require.Equal(t, "banana", likeObj["fruit"], "fruit should be from the second (latest) like")
+	
+	uidCount := 0
+	fruitCount := 0
+	for key := range likeObj {
+		if key == "uid" {
+			uidCount++
+		}
+		if key == "fruit" {
+			fruitCount++
+		}
+	}
+	require.Equal(t, 1, uidCount, "should have exactly one uid field")
+	require.Equal(t, 1, fruitCount, "should have exactly one fruit field")
+}
