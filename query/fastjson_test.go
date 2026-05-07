@@ -139,4 +139,40 @@ func TestEncode(t *testing.T) {
 		}
 		`, enc.buf.String())
 	})
+
+	t.Run("with non-list uid predicate - replace on duplicate", func(t *testing.T) {
+		root := enc.newNode(0)
+
+		personNode := enc.newNode(enc.idForAttr("person"))
+		require.NoError(t, enc.SetUID(personNode, 0x1, enc.uidAttr))
+
+		appleNode := enc.newNode(enc.idForAttr("like"))
+		require.NoError(t, enc.SetUID(appleNode, 0x2, enc.uidAttr))
+		require.NoError(t, enc.AddValue(appleNode, enc.idForAttr("fruit"), types.Val{Tid: types.StringID, Value: "apple"}))
+
+		bananaNode := enc.newNode(enc.idForAttr("like"))
+		require.NoError(t, enc.SetUID(bananaNode, 0x3, enc.uidAttr))
+		require.NoError(t, enc.AddValue(bananaNode, enc.idForAttr("fruit"), types.Val{Tid: types.StringID, Value: "banana"}))
+
+		enc.AddMapChild(personNode, appleNode)
+		enc.AddMapChild(personNode, bananaNode)
+
+		enc.AddListChild(root, personNode)
+
+		enc.buf.Reset()
+		require.NoError(t, enc.encode(root))
+		testutil.CompareJSON(t, `
+		{
+			"person":[
+				{
+					"uid":"0x1",
+					"like":{
+						"uid":"0x3",
+						"fruit":"banana"
+					}
+				}
+			]
+		}
+		`, enc.buf.String())
+	})
 }
