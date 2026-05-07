@@ -139,4 +139,31 @@ func TestEncode(t *testing.T) {
 		}
 		`, enc.buf.String())
 	})
+
+	t.Run("with non-list uid predicate using AddMapChild should not create duplicate fields", func(t *testing.T) {
+		root := enc.newNode(0)
+
+		like1 := enc.newNode(enc.idForAttr("like"))
+		require.NoError(t, enc.SetUID(like1, 0x2, enc.uidAttr))
+		require.NoError(t, enc.AddValue(like1, enc.idForAttr("fruit"), types.Val{Tid: types.StringID, Value: "apple"}))
+		enc.AddMapChild(root, like1)
+
+		like2 := enc.newNode(enc.idForAttr("like"))
+		require.NoError(t, enc.SetUID(like2, 0x3, enc.uidAttr))
+		require.NoError(t, enc.AddValue(like2, enc.idForAttr("fruit"), types.Val{Tid: types.StringID, Value: "banana"}))
+		enc.AddMapChild(root, like2)
+
+		enc.fixOrder(root)
+		enc.buf.Reset()
+		require.NoError(t, enc.encode(root))
+		
+		testutil.CompareJSON(t, `
+		{
+			"like":{
+				"uid":"0x3",
+				"fruit":"banana"
+			}
+		}
+		`, enc.buf.String())
+	})
 }

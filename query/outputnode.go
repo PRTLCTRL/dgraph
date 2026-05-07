@@ -510,7 +510,37 @@ func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
 	if childNode == nil {
 		enc.addChildren(fj, val)
 	} else {
-		enc.addChildren(childNode, enc.children(val))
+		enc.mergeChildren(childNode, enc.children(val))
+	}
+}
+
+func (enc *encoder) mergeChildren(existingParent, newChildren fastJsonNode) {
+	for newChild := newChildren; newChild != nil; newChild = newChild.next {
+		newAttr := enc.getAttr(newChild)
+		
+		var existingChild, prevChild fastJsonNode
+		child := enc.children(existingParent)
+		for child != nil {
+			if enc.getAttr(child) == newAttr {
+				existingChild = child
+				break
+			}
+			prevChild = child
+			child = child.next
+		}
+		
+		copiedChild := enc.copySingleNode(newChild)
+		
+		if existingChild == nil {
+			enc.addChildren(existingParent, copiedChild)
+		} else {
+			if prevChild == nil {
+				existingParent.child = existingChild.next
+			} else {
+				prevChild.next = existingChild.next
+			}
+			enc.addChildren(existingParent, copiedChild)
+		}
 	}
 }
 
