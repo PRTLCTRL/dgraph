@@ -514,24 +514,24 @@ func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
 	} else {
 		valChildren := enc.children(val)
 		childChildren := enc.children(childNode)
-		
+
 		valHasUid := false
 		childHasUid := false
-		
+
 		for c := valChildren; c != nil; c = c.next {
 			if enc.getAttr(c) == enc.uidAttr {
 				valHasUid = true
 				break
 			}
 		}
-		
+
 		for c := childChildren; c != nil; c = c.next {
 			if enc.getAttr(c) == enc.uidAttr {
 				childHasUid = true
 				break
 			}
 		}
-		
+
 		if valHasUid && childHasUid {
 			if prevChild == nil {
 				fj.child = val
