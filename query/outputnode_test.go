@@ -23,6 +23,56 @@ import (
 	"github.com/dgraph-io/ristretto/v2/z"
 )
 
+func TestAddMapChildReplacesExisting(t *testing.T) {
+	enc := newEncoder()
+	parent := enc.newNode(enc.idForAttr("person"))
+
+	likeAttr := enc.idForAttr("like")
+	uidAttr := enc.uidAttr
+	fruitAttr := enc.idForAttr("fruit")
+
+	child1 := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(child1, 0x2, uidAttr))
+	fruitVal := types.Val{Tid: types.StringID, Value: "apple"}
+	require.NoError(t, enc.AddValue(child1, fruitAttr, fruitVal))
+
+	child2 := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(child2, 0x3, uidAttr))
+	fruitVal2 := types.Val{Tid: types.StringID, Value: "banana"}
+	require.NoError(t, enc.AddValue(child2, fruitAttr, fruitVal2))
+
+	enc.AddMapChild(parent, child1)
+	enc.AddMapChild(parent, child2)
+
+	enc.fixOrder(parent)
+
+	require.NoError(t, enc.encode(parent))
+	result := enc.buf.String()
+
+	var decoded map[string]interface{}
+	err := json.Unmarshal([]byte(result), &decoded)
+	require.NoError(t, err, "JSON should be valid")
+
+	like, ok := decoded["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object")
+
+	require.Equal(t, "0x3", like["uid"], "should have the latest uid value")
+	require.Equal(t, "banana", like["fruit"], "should have the latest fruit value")
+
+	uidCount := 0
+	fruitCount := 0
+	for key := range like {
+		if key == "uid" {
+			uidCount++
+		}
+		if key == "fruit" {
+			fruitCount++
+		}
+	}
+	require.Equal(t, 1, uidCount, "should have exactly one uid field")
+	require.Equal(t, 1, fruitCount, "should have exactly one fruit field")
+}
+
 func TestEncodeMemory(t *testing.T) {
 	//	if testing.Short() {
 	t.Skip("Skipping TestEncodeMemory")
