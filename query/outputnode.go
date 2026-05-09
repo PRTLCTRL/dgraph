@@ -517,7 +517,7 @@ func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
 func (enc *encoder) mergeChildren(existingParent, newChildren fastJsonNode) {
 	for newChild := newChildren; newChild != nil; newChild = newChild.next {
 		newAttr := enc.getAttr(newChild)
-		
+
 		var existingChild, prevChild fastJsonNode
 		child := enc.children(existingParent)
 		for child != nil {
@@ -528,9 +528,9 @@ func (enc *encoder) mergeChildren(existingParent, newChildren fastJsonNode) {
 			prevChild = child
 			child = child.next
 		}
-		
+
 		copiedChild := enc.copySingleNode(newChild)
-		
+
 		if existingChild == nil {
 			enc.addChildren(existingParent, copiedChild)
 		} else {

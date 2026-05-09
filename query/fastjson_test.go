@@ -156,7 +156,7 @@ func TestEncode(t *testing.T) {
 		enc.fixOrder(root)
 		enc.buf.Reset()
 		require.NoError(t, enc.encode(root))
-		
+
 		testutil.CompareJSON(t, `
 		{
 			"like":{
