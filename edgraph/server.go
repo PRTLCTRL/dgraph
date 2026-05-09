@@ -721,7 +721,7 @@ func validateCondValue(cond string) error {
 	}
 
 	lower := strings.ToLower(cond)
-	
+
 	// Check if it starts with @if or @filter, allowing optional whitespace before the opening paren
 	hasValidPrefix := false
 	directive := ""
@@ -732,11 +732,11 @@ func validateCondValue(cond string) error {
 		hasValidPrefix = true
 		directive = "@filter"
 	}
-	
+
 	if !hasValidPrefix {
 		return errors.Errorf("invalid cond value: must start with @if or @filter")
 	}
-	
+
 	// After the directive, skip any whitespace and ensure we have an opening parenthesis
 	afterDirective := strings.TrimSpace(cond[len(directive):])
 	if !strings.HasPrefix(afterDirective, "(") {
