@@ -329,10 +329,10 @@ func TestAddMapChildReplacesDuplicate(t *testing.T) {
 
 	likeObj, ok := result["like"].(map[string]interface{})
 	require.True(t, ok, "like should be an object")
-	
+
 	require.Equal(t, "0x3", likeObj["uid"], "uid should be from the second (latest) like")
 	require.Equal(t, "banana", likeObj["fruit"], "fruit should be from the second (latest) like")
-	
+
 	uidCount := 0
 	fruitCount := 0
 	for key := range likeObj {
