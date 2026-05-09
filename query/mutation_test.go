@@ -117,9 +117,9 @@ func TestMultipleMutationsNoDuplicateJSON(t *testing.T) {
 		}
 	`
 	setSchema(schema)
-	
+
 	ctx := context.Background()
-	
+
 	mu := &api.Mutation{
 		SetNquads: []byte(`
 			_:person <name> "Tom" .
@@ -132,43 +132,43 @@ func TestMultipleMutationsNoDuplicateJSON(t *testing.T) {
 		`),
 		CommitNow: true,
 	}
-	
+
 	txn := client.NewTxn()
 	assigned, err := txn.Mutate(ctx, mu)
 	require.NoError(t, err)
-	
+
 	dql := `{
 		person as var(func: eq(name, "Tom"))
 		banana as var(func: eq(fruit, "banana"))
 	}`
-	
+
 	mu1 := &api.Mutation{
 		DelNquads: []byte(`uid(person) <like> * .`),
 	}
 	mu2 := &api.Mutation{
 		SetNquads: []byte(`uid(person) <like> uid(banana) .`),
 	}
-	
+
 	req := &api.Request{
 		Query:     dql,
 		Mutations: []*api.Mutation{mu1, mu2},
 		CommitNow: true,
 	}
-	
+
 	txn = client.NewTxn()
 	_, err = txn.Do(ctx, req)
 	require.NoError(t, err)
-	
+
 	queryDql := `{
 		q(func: eq(name, "Tom")) {
 			uid
 			like { uid fruit }
 		}
 	}`
-	
+
 	resp, err := client.NewReadOnlyTxn().Query(ctx, queryDql)
 	require.NoError(t, err)
-	
+
 	type Result struct {
 		Q []struct {
 			UID  string `json:"uid"`
@@ -178,23 +178,23 @@ func TestMultipleMutationsNoDuplicateJSON(t *testing.T) {
 			} `json:"like"`
 		} `json:"q"`
 	}
-	
+
 	var result Result
 	err = json.Unmarshal(resp.Json, &result)
 	require.NoError(t, err, "JSON should be valid without duplicate fields")
 	require.Len(t, result.Q, 1)
 	require.Equal(t, "banana", result.Q[0].Like.Fruit, "Should only have banana, not apple")
 	require.Equal(t, assigned.Uids["banana"], result.Q[0].Like.UID, "UID should match banana")
-	
+
 	var rawResult map[string]interface{}
 	err = json.Unmarshal(resp.Json, &rawResult)
 	require.NoError(t, err, "JSON should be valid")
-	
+
 	q := rawResult["q"].([]interface{})
 	require.Len(t, q, 1)
 	qItem := q[0].(map[string]interface{})
 	like := qItem["like"].(map[string]interface{})
-	
+
 	require.Contains(t, like, "uid", "like should have uid field")
 	require.Contains(t, like, "fruit", "like should have fruit field")
 	require.Len(t, like, 2, "like should have exactly 2 fields, not duplicates")
