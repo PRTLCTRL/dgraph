@@ -498,19 +498,31 @@ func (enc *encoder) AddListValue(fj fastJsonNode, attr uint16, v types.Val, list
 
 func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
 	var childNode fastJsonNode
+	var prevChild fastJsonNode
 	child := enc.children(fj)
 	for child != nil {
 		if enc.getAttr(child) == enc.getAttr(val) {
 			childNode = child
 			break
 		}
+		prevChild = child
 		child = child.next
 	}
 
 	if childNode == nil {
 		enc.addChildren(fj, val)
 	} else {
-		enc.addChildren(childNode, enc.children(val))
+		if enc.getFacetsParent(childNode) {
+			enc.addChildren(childNode, enc.children(val))
+		} else {
+			if prevChild == nil {
+				fj.child = val
+				val.next = childNode.next
+			} else {
+				prevChild.next = val
+				val.next = childNode.next
+			}
+		}
 	}
 }
 

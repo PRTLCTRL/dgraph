@@ -304,3 +304,47 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacesForSingleValuedPredicate(t *testing.T) {
+	enc := newEncoder()
+	parent := enc.newNode(enc.idForAttr("person"))
+
+	likeAttr := enc.idForAttr("like")
+
+	oldChild := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(oldChild, 0x2, enc.uidAttr))
+	fruitAttr := enc.idForAttr("fruit")
+	appleVal := types.Val{Tid: types.StringID, Value: "apple"}
+	require.NoError(t, enc.AddValue(oldChild, fruitAttr, appleVal))
+
+	enc.AddMapChild(parent, oldChild)
+
+	newChild := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(newChild, 0x3, enc.uidAttr))
+	bananaVal := types.Val{Tid: types.StringID, Value: "banana"}
+	require.NoError(t, enc.AddValue(newChild, fruitAttr, bananaVal))
+
+	enc.AddMapChild(parent, newChild)
+
+	enc.fixOrder(parent)
+
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(parent))
+	result := enc.buf.String()
+
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(result), &decoded))
+
+	likeObj, ok := decoded["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object, not merged")
+	require.Equal(t, "0x3", likeObj["uid"], "should have the new UID (banana)")
+	require.Equal(t, "banana", likeObj["fruit"], "should have the new fruit value")
+
+	uidCount := 0
+	for key := range likeObj {
+		if key == "uid" {
+			uidCount++
+		}
+	}
+	require.Equal(t, 1, uidCount, "should not have duplicate uid keys")
+}
