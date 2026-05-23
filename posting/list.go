@@ -790,8 +790,24 @@ func (l *List) updateMutationLayer(mpost *pb.Posting, singleUidUpdate, hasCountI
 		// be done because the fingerprint for the value is not math.MaxUint64 as is
 		// the case with the rest of the scalar predicates.
 		newPlist := &pb.PostingList{}
-		if mpost.Op != Del {
+		
+		// Check if there's already a delete-all posting in currentEntries from a previous
+		// mutation in the same transaction (e.g., DELETE * followed by SET).
+		// If so, preserve it to ensure the immutable layer is properly hidden.
+		hasExistingDeleteAll := false
+		if l.mutationMap.currentEntries != nil {
+			for _, p := range l.mutationMap.currentEntries.Postings {
+				if hasDeleteAll(p) {
+					newPlist.Postings = append(newPlist.Postings, p)
+					hasExistingDeleteAll = true
+					break
+				}
+			}
+		}
+		
+		if mpost.Op != Del && !hasExistingDeleteAll {
 			// If we are setting a new value then we can just delete all the older values.
+			// Only add a delete-all if one doesn't already exist.
 			newPlist.Postings = append(newPlist.Postings, createDeleteAllPosting())
 		}
 		newPlist.Postings = append(newPlist.Postings, mpost)
