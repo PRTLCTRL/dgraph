@@ -304,3 +304,93 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacesExisting(t *testing.T) {
+	enc := newEncoder()
+	defer func() {
+		arenaPool.Put(enc.arena)
+		enc.alloc.Release()
+	}()
+
+	parent := enc.newNode(enc.idForAttr("person"))
+	likeAttr := enc.idForAttr("like")
+
+	oldChild := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(oldChild, 0x2, enc.uidAttr))
+
+	enc.AddMapChild(parent, oldChild)
+
+	newChild := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(newChild, 0x3, enc.uidAttr))
+
+	enc.AddMapChild(parent, newChild)
+
+	enc.fixOrder(parent)
+
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(parent))
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(enc.buf.Bytes(), &result))
+
+	like, ok := result["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object")
+
+	uid, ok := like["uid"].(string)
+	require.True(t, ok, "uid should be a string")
+	require.Equal(t, "0x3", uid, "should have only the new uid, not the old one")
+
+	require.Equal(t, 1, len(like), "like object should have exactly one uid field")
+}
+
+func TestAddMapChildWithNestedObjects(t *testing.T) {
+	enc := newEncoder()
+	defer func() {
+		arenaPool.Put(enc.arena)
+		enc.alloc.Release()
+	}()
+
+	root := enc.newNode(enc.idForAttr("root"))
+
+	person := enc.newNode(enc.idForAttr("person"))
+	require.NoError(t, enc.SetUID(person, 0x1, enc.uidAttr))
+
+	likeAttr := enc.idForAttr("like")
+
+	apple := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(apple, 0x2, enc.uidAttr))
+	fruitVal := types.Val{Tid: types.StringID, Value: "apple"}
+	require.NoError(t, enc.AddValue(apple, enc.idForAttr("fruit"), fruitVal))
+	enc.AddMapChild(person, apple)
+
+	banana := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(banana, 0x3, enc.uidAttr))
+	fruitVal = types.Val{Tid: types.StringID, Value: "banana"}
+	require.NoError(t, enc.AddValue(banana, enc.idForAttr("fruit"), fruitVal))
+	enc.AddMapChild(person, banana)
+
+	enc.AddMapChild(root, person)
+	enc.fixOrder(root)
+
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(root))
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal(enc.buf.Bytes(), &result))
+
+	personData, ok := result["person"].(map[string]interface{})
+	require.True(t, ok, "person should be an object")
+
+	like, ok := personData["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object, not an array")
+
+	uid, ok := like["uid"].(string)
+	require.True(t, ok, "uid should be a string")
+	require.Equal(t, "0x3", uid, "should have only the new uid (banana)")
+
+	fruit, ok := like["fruit"].(string)
+	require.True(t, ok, "fruit should be a string")
+	require.Equal(t, "banana", fruit, "should have banana as fruit")
+
+	require.Equal(t, 2, len(like), "like object should have exactly uid and fruit fields")
+}
