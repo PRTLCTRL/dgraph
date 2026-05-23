@@ -251,6 +251,30 @@ func TestChildrenOrder(t *testing.T) {
 	require.Nil(t, child)
 }
 
+func TestAddMapChildReplacement(t *testing.T) {
+	enc := newEncoder()
+	root := enc.newNode(enc.idForAttr("person"))
+
+	firstChild := enc.newNode(enc.idForAttr("like"))
+	enc.SetUID(firstChild, 0x2, enc.uidAttr)
+	enc.AddMapChild(root, firstChild)
+
+	secondChild := enc.newNode(enc.idForAttr("like"))
+	enc.SetUID(secondChild, 0x3, enc.uidAttr)
+	enc.AddMapChild(root, secondChild)
+
+	likeAttr := enc.idForAttr("like")
+	childCount := 0
+	child := root.child
+	for child != nil {
+		if enc.getAttr(child) == likeAttr {
+			childCount++
+		}
+		child = child.next
+	}
+	require.Equal(t, 1, childCount, "Expected only one 'like' child after replacement")
+}
+
 func TestMarshalTimeJson(t *testing.T) {
 	var timesToMarshal = []struct {
 		in  time.Time
