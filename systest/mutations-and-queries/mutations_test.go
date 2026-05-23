@@ -2932,3 +2932,108 @@ func (ssuite *SystestTestSuite) TestAddAndQueryZeroTimeValue() {
 		]
 	  }`, string(resp.Json))
 }
+
+func (ssuite *SystestTestSuite) TestMultipleMutationsNonListPredicate() {
+	t := ssuite.T()
+	gcli, cleanup, err := doGrpcLogin(ssuite)
+	defer cleanup()
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	require.NoError(t, gcli.Alter(ctx, &api.Operation{Schema: `
+		name: string @index(exact) .
+		like: uid @reverse .
+		fruit: string @index(exact) .
+
+		type Person {
+			name
+			like
+		}
+		type Fruit {
+			fruit
+		}
+	`}))
+
+	// Set up initial data: Person named Tom likes apple
+	txn := gcli.NewTxn()
+	assigned, err := txn.Mutate(ctx, &api.Mutation{
+		SetNquads: []byte(`
+			_:person <name> "Tom" .
+			_:person <dgraph.type> "Person" .
+			_:apple <fruit> "apple" .
+			_:apple <dgraph.type> "Fruit" .
+			_:banana <fruit> "banana" .
+			_:banana <dgraph.type> "Fruit" .
+			_:person <like> _:apple .
+		`),
+	})
+	require.NoError(t, err)
+	require.NoError(t, txn.Commit(ctx))
+
+	// Verify initial state
+	q := `{
+		q(func: eq(name, "Tom")) {
+			uid
+			like { uid fruit }
+		}
+	}`
+	resp, err := gcli.NewTxn().Query(ctx, q)
+	require.NoError(t, err)
+	require.Contains(t, string(resp.Json), `"fruit":"apple"`)
+
+	// Upgrade
+	ssuite.Upgrade()
+
+	gcli, cleanup, err = doGrpcLogin(ssuite)
+	defer cleanup()
+	require.NoError(t, err)
+	ctx = context.Background()
+
+	// Now perform the mutation that triggers the bug:
+	// Delete the old 'like' edge and set a new one in the same transaction
+	dql := `{
+		person as var(func: eq(name, "Tom"))
+		banana as var(func: eq(fruit, "banana"))
+	}`
+	mu1 := &api.Mutation{
+		DelNquads: []byte(`uid(person) <like> * .`),
+	}
+	mu2 := &api.Mutation{
+		SetNquads: []byte(`uid(person) <like> uid(banana) .`),
+	}
+	req := &api.Request{
+		Query:     dql,
+		Mutations: []*api.Mutation{mu1, mu2},
+		CommitNow: true,
+	}
+	txn = gcli.NewTxn()
+	_, err = txn.Do(ctx, req)
+	require.NoError(t, err)
+
+	// Query to verify the result
+	resp, err = gcli.NewTxn().Query(ctx, q)
+	require.NoError(t, err)
+
+	// The JSON should be valid and contain only the new value (banana)
+	var result map[string]interface{}
+	err = json.Unmarshal(resp.Json, &result)
+	require.NoError(t, err, "JSON response should be valid")
+
+	// Verify that we only have banana, not both apple and banana
+	qList := result["q"].([]interface{})
+	require.Equal(t, 1, len(qList))
+	qObj := qList[0].(map[string]interface{})
+	require.Contains(t, qObj, "like")
+
+	likeObj := qObj["like"].(map[string]interface{})
+	require.Contains(t, likeObj, "fruit")
+	require.Equal(t, "banana", likeObj["fruit"])
+
+	// Make sure there's only one uid field in the like object
+	// If the bug exists, we'd have duplicate uid fields which would
+	// either fail JSON parsing or overwrite each other
+	uidField, ok := likeObj["uid"].(string)
+	require.True(t, ok, "uid should be a string")
+	require.NotEmpty(t, uidField)
+}
+
