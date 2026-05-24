@@ -304,3 +304,52 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacement(t *testing.T) {
+	enc := newEncoder()
+	root := enc.newNode(enc.idForAttr("root"))
+
+	likeAttr := enc.idForAttr("like")
+	uidAttr := enc.idForAttr("uid")
+	fruitAttr := enc.idForAttr("fruit")
+
+	firstLike := enc.newNode(likeAttr)
+	firstUid := enc.newNode(uidAttr)
+	require.NoError(t, enc.setScalarVal(firstUid, []byte("\"0x2\"")))
+	enc.addChildren(firstLike, firstUid)
+	firstFruit := enc.newNode(fruitAttr)
+	require.NoError(t, enc.setScalarVal(firstFruit, []byte("\"apple\"")))
+	enc.addChildren(firstLike, firstFruit)
+
+	secondLike := enc.newNode(likeAttr)
+	secondUid := enc.newNode(uidAttr)
+	require.NoError(t, enc.setScalarVal(secondUid, []byte("\"0x3\"")))
+	enc.addChildren(secondLike, secondUid)
+	secondFruit := enc.newNode(fruitAttr)
+	require.NoError(t, enc.setScalarVal(secondFruit, []byte("\"banana\"")))
+	enc.addChildren(secondLike, secondFruit)
+
+	enc.AddMapChild(root, firstLike)
+	enc.AddMapChild(root, secondLike)
+
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(root))
+	jsonOutput := enc.buf.String()
+
+	var result map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(jsonOutput), &result))
+
+	likeVal, ok := result["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object, not an array")
+
+	require.Equal(t, "0x3", likeVal["uid"], "Should have the second (replacement) uid")
+	require.Equal(t, "banana", likeVal["fruit"], "Should have the second (replacement) fruit")
+
+	uidCount := 0
+	for key := range likeVal {
+		if key == "uid" {
+			uidCount++
+		}
+	}
+	require.Equal(t, 1, uidCount, "Should only have one uid field, not duplicates")
+}
