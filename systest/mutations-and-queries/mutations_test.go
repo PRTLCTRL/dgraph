@@ -2932,3 +2932,108 @@ func (ssuite *SystestTestSuite) TestAddAndQueryZeroTimeValue() {
 		]
 	  }`, string(resp.Json))
 }
+
+func (ssuite *SystestTestSuite) TestMultipleMutationsNoDuplicateJSON() {
+	t := ssuite.T()
+	gcli, cleanup, err := doGrpcLogin(ssuite)
+	defer cleanup()
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	op := &api.Operation{Schema: `
+		name: string @index(exact) .
+		like: uid @reverse .
+		fruit: string @index(exact) .
+
+		type Person {
+			name
+			like
+		}
+		type Fruit {
+			fruit
+		}
+	`}
+	require.NoError(t, gcli.Alter(ctx, op))
+
+	txn := gcli.NewTxn()
+	_, err = txn.Mutate(ctx, &api.Mutation{
+		SetNquads: []byte(`
+			_:person <name> "Tom" .
+			_:person <dgraph.type> "Person" .
+			_:apple <fruit> "apple" .
+			_:apple <dgraph.type> "Fruit" .
+			_:banana <fruit> "banana" .
+			_:banana <dgraph.type> "Fruit" .
+			_:person <like> _:apple .
+		`),
+	})
+	require.NoError(t, err)
+	require.NoError(t, txn.Commit(ctx))
+
+	// Upgrade
+	ssuite.Upgrade()
+
+	gcli, cleanup, err = doGrpcLogin(ssuite)
+	defer cleanup()
+	require.NoError(t, err)
+
+	dql := `{
+		person as var(func: eq(name, "Tom"))
+		banana as var(func: eq(fruit, "banana"))
+	}`
+
+	mu1 := &api.Mutation{
+		DelNquads: []byte(`uid(person) <like> * .`),
+	}
+	mu2 := &api.Mutation{
+		SetNquads: []byte(`uid(person) <like> uid(banana) .`),
+	}
+
+	req := &api.Request{
+		Query:     dql,
+		Mutations: []*api.Mutation{mu1, mu2},
+		CommitNow: true,
+	}
+
+	txn = gcli.NewTxn()
+	_, err = txn.Do(ctx, req)
+	require.NoError(t, err)
+
+	queryDQL := `{
+		q(func: eq(name, "Tom")) {
+			uid
+			like { uid fruit }
+		}
+	}`
+
+	txn = gcli.NewTxn()
+	resp, err := txn.Query(ctx, queryDQL)
+	require.NoError(t, err)
+
+	jsonStr := string(resp.Json)
+	t.Logf("Response JSON: %s", jsonStr)
+
+	var result map[string]interface{}
+	err = json.Unmarshal(resp.Json, &result)
+	require.NoError(t, err)
+
+	q, ok := result["q"].([]interface{})
+	require.True(t, ok, "q should be an array")
+	require.Len(t, q, 1, "should have one result")
+
+	person, ok := q[0].(map[string]interface{})
+	require.True(t, ok, "person should be a map")
+
+	like, ok := person["like"].(map[string]interface{})
+	require.True(t, ok, "like should be a map")
+
+	fruit, ok := like["fruit"].(string)
+	require.True(t, ok, "like should have fruit field")
+	require.Equal(t, "banana", fruit, "fruit should be banana")
+
+	uid, ok := like["uid"].(string)
+	require.True(t, ok, "like should have exactly one uid field")
+	require.NotEmpty(t, uid, "uid should not be empty")
+
+	require.Len(t, like, 2, "like object should have exactly 2 fields (uid and fruit), not duplicate uid fields")
+}
