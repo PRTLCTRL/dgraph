@@ -388,6 +388,11 @@ func TestValidateCondValue(t *testing.T) {
 		`@if(not(eq(len(v), 0)))`,
 		`@if(eq(name, "has (parens) inside"))`,
 		`@filter(eq(len(v), 0))`,
+		`@if (eq(len(v), 0))`,
+		`@if  (eq(len(v), 0))`,
+		`@if ( NOT eq(len(RoutesId), 0) )`,
+		`@filter (eq(len(v), 0))`,
+		`@filter  (eq(len(v), 0))`,
 	}
 	for _, c := range valid {
 		require.NoError(t, validateCondValue(c), "expected valid: %q", c)
@@ -417,6 +422,14 @@ func TestValidateCondValue(t *testing.T) {
 		{
 			cond: "@if(eq(name, \"x\")) extra",
 			desc: "trailing content after condition",
+		},
+		{
+			cond: "@ifx(eq(name, \"x\"))",
+			desc: "invalid characters between directive and parenthesis",
+		},
+		{
+			cond: "@filterX(eq(name, \"x\"))",
+			desc: "invalid characters between directive and parenthesis",
 		},
 	}
 	for _, tc := range invalid {
