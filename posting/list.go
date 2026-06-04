@@ -260,6 +260,18 @@ func (mm *MutableLayer) populateDeleteAll(readTs uint64) uint64 {
 		}
 	})
 
+	// Also check currentEntries for delete-all markers when reading from the same transaction
+	if mm.currentEntries != nil && mm.readTs == readTs {
+		for _, pl := range mm.currentEntries.Postings {
+			if hasDeleteAll(pl) {
+				deleteAllMarker = x.Max(deleteAllMarker, mm.readTs)
+				if mm.readTs <= readTs {
+					deleteAllMarkerBelowTs = x.Max(deleteAllMarkerBelowTs, mm.readTs)
+				}
+			}
+		}
+	}
+
 	mm.deleteAllMarker = deleteAllMarker
 	return deleteAllMarkerBelowTs
 }
