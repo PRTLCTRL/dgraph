@@ -89,6 +89,50 @@ func TestNormalizeJSONLimit(t *testing.T) {
 	require.Error(t, err, "Couldn't evaluate @normalize directive - too many results")
 }
 
+func TestAddMapChildReplacesExisting(t *testing.T) {
+	enc := newEncoder()
+	parent := enc.newNode(enc.idForAttr("person"))
+
+	likeAttr := enc.idForAttr("like")
+
+	oldChild := enc.newNode(likeAttr)
+	oldUID, err := enc.makeUidNode(enc.uidAttr, 0x2)
+	require.NoError(t, err)
+	enc.addChildren(oldChild, oldUID)
+	fruitAttr := enc.idForAttr("fruit")
+	fruitVal := types.Val{Tid: types.StringID, Value: "apple"}
+	require.NoError(t, enc.AddValue(oldChild, fruitAttr, fruitVal))
+
+	enc.AddMapChild(parent, oldChild)
+
+	newChild := enc.newNode(likeAttr)
+	newUID, err := enc.makeUidNode(enc.uidAttr, 0x3)
+	require.NoError(t, err)
+	enc.addChildren(newChild, newUID)
+	newFruitVal := types.Val{Tid: types.StringID, Value: "banana"}
+	require.NoError(t, enc.AddValue(newChild, fruitAttr, newFruitVal))
+
+	enc.AddMapChild(parent, newChild)
+
+	enc.fixOrder(parent)
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(parent))
+
+	result := enc.buf.String()
+	t.Logf("JSON output: %s", result)
+
+	require.NotContains(t, result, `"uid":"0x2"`, "Should not contain old UID (apple)")
+	require.Contains(t, result, `"uid":"0x3"`, "Should contain new UID (banana)")
+	require.NotContains(t, result, `"fruit":"apple"`, "Should not contain old fruit (apple)")
+	require.Contains(t, result, `"fruit":"banana"`, "Should contain new fruit (banana)")
+
+	uidCount := bytes.Count([]byte(result), []byte(`"uid":`))
+	require.Equal(t, 1, uidCount, "Should have exactly one uid field, got %d", uidCount)
+
+	fruitCount := bytes.Count([]byte(result), []byte(`"fruit":`))
+	require.Equal(t, 1, fruitCount, "Should have exactly one fruit field, got %d", fruitCount)
+}
+
 func BenchmarkJsonMarshal(b *testing.B) {
 	inputStrings := [][]string{
 		{"largestring", strings.Repeat("a", 1024)},
