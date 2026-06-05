@@ -304,3 +304,57 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestSingleValuedUidPredicateWithMultipleUids(t *testing.T) {
+	enc := newEncoder()
+	root := enc.newNode(enc.idForAttr("root"))
+
+	likeAttr := enc.idForAttr("like")
+
+	apple := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(apple, 0x2, enc.uidAttr))
+	require.NoError(t, enc.AddValue(apple, enc.idForAttr("fruit"),
+		types.Val{Tid: types.StringID, Value: "apple"}))
+
+	banana := enc.newNode(likeAttr)
+	require.NoError(t, enc.SetUID(banana, 0x3, enc.uidAttr))
+	require.NoError(t, enc.AddValue(banana, enc.idForAttr("fruit"),
+		types.Val{Tid: types.StringID, Value: "banana"}))
+
+	enc.AddMapChild(root, apple)
+	enc.AddMapChild(root, banana)
+
+	enc.fixOrder(root)
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(root))
+
+	result := enc.buf.String()
+
+	var decoded map[string]interface{}
+	err := json.Unmarshal([]byte(result), &decoded)
+	require.NoError(t, err, "JSON should be valid, got: %s", result)
+
+	like, ok := decoded["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object")
+
+	_, hasUid := like["uid"]
+	require.True(t, hasUid, "like object should have uid field")
+
+	_, hasFruit := like["fruit"]
+	require.True(t, hasFruit, "like object should have fruit field")
+
+	uidCount := 0
+	fruitCount := 0
+	for key := range like {
+		if key == "uid" {
+			uidCount++
+		}
+		if key == "fruit" {
+			fruitCount++
+		}
+	}
+
+	require.Equal(t, 1, uidCount, "like object should have exactly one uid field, not duplicates")
+	require.Equal(t, 1, fruitCount, "like object should have exactly one fruit field, not duplicates")
+	require.Equal(t, "banana", like["fruit"], "like object should have the last value (banana)")
+}
