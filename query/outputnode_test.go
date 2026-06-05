@@ -304,3 +304,51 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChild_ReplaceDuplicateAttribute(t *testing.T) {
+	enc := newEncoder()
+	parent := enc.newNode(enc.idForAttr("person"))
+
+	likeAttr := enc.idForAttr("like")
+	appleUID := uint64(0x2)
+	bananaUID := uint64(0x3)
+
+	appleNode := enc.newNode(likeAttr)
+	uidNode1, err := enc.makeUidNode(enc.uidAttr, appleUID)
+	require.NoError(t, err)
+	enc.addChildren(appleNode, uidNode1)
+	enc.AddMapChild(parent, appleNode)
+
+	bananaNode := enc.newNode(likeAttr)
+	uidNode2, err := enc.makeUidNode(enc.uidAttr, bananaUID)
+	require.NoError(t, err)
+	enc.addChildren(bananaNode, uidNode2)
+	enc.AddMapChild(parent, bananaNode)
+
+	children := enc.children(parent)
+	require.NotNil(t, children)
+
+	childCount := 0
+	for child := children; child != nil; child = child.next {
+		childCount++
+	}
+	require.Equal(t, 1, childCount)
+
+	likeChild := enc.children(parent)
+	require.Equal(t, likeAttr, enc.getAttr(likeChild))
+
+	uidChild := enc.children(likeChild)
+	require.NotNil(t, uidChild)
+	val, err := enc.getScalarVal(uidChild)
+	require.NoError(t, err)
+	require.Equal(t, x.ToHex(bananaUID, false), val)
+
+	enc.fixOrder(parent)
+	enc.buf.Reset()
+	err = enc.encode(parent)
+	require.NoError(t, err)
+
+	result := enc.buf.String()
+	require.Contains(t, result, "0x3")
+	require.NotContains(t, result, "0x2")
+}
