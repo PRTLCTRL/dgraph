@@ -1418,102 +1418,107 @@ func (sg *SubGraph) preTraverse(enc *encoder, uid uint64, dst fastJsonNode) erro
 				pc.Params.ParentIds = sg.Params.ParentIds
 			}
 
-			// calculate it once to avoid multiple call to idToAttr()
-			fieldID := enc.idForAttr(fieldName)
-			// Add len of fieldName to enc.curSize.
-			enc.curSize += uint64(len(fieldName))
+		// calculate it once to avoid multiple call to idToAttr()
+		fieldID := enc.idForAttr(fieldName)
+		// Add len of fieldName to enc.curSize.
+		enc.curSize += uint64(len(fieldName))
 
-			// We create as many predicate entity children as the length of uids for
-			// this predicate.
-			ul := pc.uidMatrix[idx]
-			for childIdx, childUID := range ul.Uids {
-				if fieldName == "" || (invalidUids != nil && invalidUids[childUID]) {
+		// We create as many predicate entity children as the length of uids for
+		// this predicate.
+		ul := pc.uidMatrix[idx]
+		startIdx := 0
+		if !pc.List && len(ul.Uids) > 1 {
+			startIdx = len(ul.Uids) - 1
+		}
+		for childIdx := startIdx; childIdx < len(ul.Uids); childIdx++ {
+			childUID := ul.Uids[childIdx]
+			if fieldName == "" || (invalidUids != nil && invalidUids[childUID]) {
+				continue
+			}
+			uc := enc.newNode(fieldID)
+			if rerr := pc.preTraverse(enc, childUID, uc); rerr != nil {
+				if rerr.Error() == "_INV_" {
+					if invalidUids == nil {
+						invalidUids = make(map[uint64]bool)
+					}
+
+					invalidUids[childUID] = true
+					continue // next UID.
+				}
+				return rerr
+			}
+
+			if !enc.IsEmpty(uc) {
+				if sg.Params.GetUid {
+					if err := enc.SetUID(uc, childUID, enc.uidAttr); err != nil {
+						return err
+					}
+				}
+
+				// Add facets nodes.
+				if pc.Params.Facet != nil && len(fcsList) > childIdx {
+					fs := fcsList[childIdx].Facets
+					if err := enc.attachFacets(uc, fieldName, false, fs, childIdx); err != nil {
+						return err
+					}
+				}
+
+				if pc.Params.Normalize {
+					// We will normalize at each level instead of
+					// calling normalize after pretraverse.
+					// Now normalize() only flattens one level,
+					// the expectation is that its children have
+					// already been normalized.
+
+					// TODO(ashish): Check reason for calling fixOrder() here in
+					// processNodeUids(), just before calling normalize().
+					enc.fixOrder(uc)
+					normAttrs, err := enc.normalize(uc)
+					if err != nil {
+						return err
+					}
+
+					for _, c := range normAttrs {
+						// Adding as list child irrespective of the type of pc
+						// (list or non-list), otherwise result might be inconsistent or might
+						// depend on children and grandchildren of pc. Consider the case:
+						// 	boss: uid .
+						// 	friend: [uid] .
+						// 	name: string .
+						// For query like:
+						// {
+						// 	me(func: uid(0x1)) {
+						// 		boss @normalize {
+						// 			name
+						// 		}
+						// 	}
+						// }
+						// boss will be non list type in response, but for query like:
+						// {
+						// 	me(func: uid(0x1)) {
+						// 		boss @normalize {
+						// 			friend {
+						// 				name
+						// 			}
+						// 		}
+						// 	}
+						// }
+						// boss should be of list type because there can be multiple friends of
+						// boss.
+						node := enc.newNode(fieldID)
+						enc.setVisited(node, true)
+						enc.addChildren(node, c)
+						enc.AddListChild(dst, node)
+					}
 					continue
 				}
-				uc := enc.newNode(fieldID)
-				if rerr := pc.preTraverse(enc, childUID, uc); rerr != nil {
-					if rerr.Error() == "_INV_" {
-						if invalidUids == nil {
-							invalidUids = make(map[uint64]bool)
-						}
-
-						invalidUids[childUID] = true
-						continue // next UID.
-					}
-					return rerr
-				}
-
-				if !enc.IsEmpty(uc) {
-					if sg.Params.GetUid {
-						if err := enc.SetUID(uc, childUID, enc.uidAttr); err != nil {
-							return err
-						}
-					}
-
-					// Add facets nodes.
-					if pc.Params.Facet != nil && len(fcsList) > childIdx {
-						fs := fcsList[childIdx].Facets
-						if err := enc.attachFacets(uc, fieldName, false, fs, childIdx); err != nil {
-							return err
-						}
-					}
-
-					if pc.Params.Normalize {
-						// We will normalize at each level instead of
-						// calling normalize after pretraverse.
-						// Now normalize() only flattens one level,
-						// the expectation is that its children have
-						// already been normalized.
-
-						// TODO(ashish): Check reason for calling fixOrder() here in
-						// processNodeUids(), just before calling normalize().
-						enc.fixOrder(uc)
-						normAttrs, err := enc.normalize(uc)
-						if err != nil {
-							return err
-						}
-
-						for _, c := range normAttrs {
-							// Adding as list child irrespective of the type of pc
-							// (list or non-list), otherwise result might be inconsistent or might
-							// depend on children and grandchildren of pc. Consider the case:
-							// 	boss: uid .
-							// 	friend: [uid] .
-							// 	name: string .
-							// For query like:
-							// {
-							// 	me(func: uid(0x1)) {
-							// 		boss @normalize {
-							// 			name
-							// 		}
-							// 	}
-							// }
-							// boss will be non list type in response, but for query like:
-							// {
-							// 	me(func: uid(0x1)) {
-							// 		boss @normalize {
-							// 			friend {
-							// 				name
-							// 			}
-							// 		}
-							// 	}
-							// }
-							// boss should be of list type because there can be multiple friends of
-							// boss.
-							node := enc.newNode(fieldID)
-							enc.setVisited(node, true)
-							enc.addChildren(node, c)
-							enc.AddListChild(dst, node)
-						}
-						continue
-					}
-					if pc.List {
-						enc.AddListChild(dst, uc)
-					} else {
-						enc.AddMapChild(dst, uc)
-					}
+				if pc.List {
+					enc.AddListChild(dst, uc)
+				} else {
+					enc.AddMapChild(dst, uc)
 				}
 			}
+		}
 
 			// add value for count(uid) nodes if any.
 			if _, err := pc.handleCountUIDNodes(enc, dst, len(ul.Uids)); err != nil {

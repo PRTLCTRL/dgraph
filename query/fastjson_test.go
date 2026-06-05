@@ -140,3 +140,52 @@ func TestEncode(t *testing.T) {
 		`, enc.buf.String())
 	})
 }
+
+func TestNonListUidPredicateWithMultipleValues(t *testing.T) {
+	sg := &SubGraph{
+		Params: params{
+			Alias:  "query",
+			GetUid: true,
+		},
+		SrcUIDs:  &pb.List{Uids: []uint64{1}},
+		DestUIDs: &pb.List{Uids: []uint64{1}},
+		uidMatrix: []*pb.List{
+			{Uids: []uint64{1}},
+		},
+		Children: []*SubGraph{
+			{
+				Attr:     "like",
+				SrcUIDs:  &pb.List{Uids: []uint64{1}},
+				DestUIDs: &pb.List{Uids: []uint64{2, 3}},
+				uidMatrix: []*pb.List{
+					{Uids: []uint64{2, 3}},
+				},
+				List: false,
+				Children: []*SubGraph{
+					{
+						Attr:     "fruit",
+						SrcUIDs:  &pb.List{Uids: []uint64{2, 3}},
+						DestUIDs: &pb.List{Uids: []uint64{2, 3}},
+						uidMatrix: []*pb.List{
+							{},
+							{},
+						},
+						valueMatrix: []*pb.ValueList{
+							{
+								Values: []*pb.TaskValue{task.FromString("apple")},
+							},
+							{
+								Values: []*pb.TaskValue{task.FromString("banana")},
+							},
+						},
+					},
+				},
+				Params: params{GetUid: true},
+			},
+		},
+	}
+
+	buf, err := ToJson(context.Background(), &Latency{}, []*SubGraph{sg}, nil)
+	require.NoError(t, err)
+	testutil.CompareJSON(t, `{"query":[{"uid":"0x1","like":{"uid":"0x3","fruit":"banana"}}]}`, string(buf))
+}
