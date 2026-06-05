@@ -1096,7 +1096,15 @@ func (l *List) pickPostings(readTs uint64) (uint64, []*pb.Posting) {
 	deleteAllMarker := l.mutationMap.iterate(func(ts uint64, plist *pb.PostingList) {
 		// ts will be plist.CommitTs for committed transactions
 		// ts will be readTs for mutations that are me
-		posts = append(posts, plist.Postings...)
+		for _, p := range plist.Postings {
+			// Skip deleteAll postings as they're only used to set the marker timestamp.
+			// Including them would cause them to appear after regular postings in sorted order
+			// (since deleteAll has UID = math.MaxUint64), allowing immutable postings to be
+			// incorrectly returned before the deleteAll is processed.
+			if !hasDeleteAll(p) {
+				posts = append(posts, p)
+			}
+		}
 	}, readTs)
 
 	// Sort all the postings by UID (inc order), then by commit/startTs in dec order.
