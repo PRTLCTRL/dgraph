@@ -498,19 +498,44 @@ func (enc *encoder) AddListValue(fj fastJsonNode, attr uint16, v types.Val, list
 
 func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
 	var childNode fastJsonNode
+	var prevNode fastJsonNode
 	child := enc.children(fj)
 	for child != nil {
 		if enc.getAttr(child) == enc.getAttr(val) {
 			childNode = child
 			break
 		}
+		prevNode = child
 		child = child.next
 	}
 
 	if childNode == nil {
 		enc.addChildren(fj, val)
 	} else {
-		enc.addChildren(childNode, enc.children(val))
+		// Check if the existing child has a uid field. If it does, this is a uid predicate
+		// and we should replace the entire child to avoid duplicate uid fields in the JSON.
+		hasUid := false
+		existingChild := enc.children(childNode)
+		for existingChild != nil {
+			if enc.getAttr(existingChild) == enc.uidAttr {
+				hasUid = true
+				break
+			}
+			existingChild = existingChild.next
+		}
+
+		if hasUid {
+			// Replace the existing child entirely for uid predicates
+			if prevNode == nil {
+				fj.child = childNode.next
+			} else {
+				prevNode.next = childNode.next
+			}
+			enc.addChildren(fj, val)
+		} else {
+			// Merge children for non-uid predicates (e.g., facets)
+			enc.addChildren(childNode, enc.children(val))
+		}
 	}
 }
 
