@@ -2932,3 +2932,96 @@ func (ssuite *SystestTestSuite) TestAddAndQueryZeroTimeValue() {
 		]
 	  }`, string(resp.Json))
 }
+
+func (ssuite *SystestTestSuite) TestMultipleMutationsDeleteSetDuplicateFields() {
+	t := ssuite.T()
+	gcli, cleanup, err := doGrpcLogin(ssuite)
+	defer cleanup()
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	schema := `
+		<name>: string @index(exact) .
+		<like>: uid @reverse .
+		<fruit>: string @index(exact) .
+
+		type Person {
+			name
+			like
+		}
+		type Fruit {
+			fruit
+		}
+	`
+	require.NoError(t, gcli.Alter(ctx, &api.Operation{Schema: schema}))
+
+	mu := &api.Mutation{
+		SetNquads: []byte(`
+			_:person <name> "Tom" .
+			_:person <dgraph.type> "Person" .
+			_:apple <fruit> "apple" .
+			_:apple <dgraph.type> "Fruit" .
+			_:banana <fruit> "banana" .
+			_:banana <dgraph.type> "Fruit" .
+			_:person <like> _:apple .
+		`),
+		CommitNow: true,
+	}
+	_, err = gcli.NewTxn().Mutate(ctx, mu)
+	require.NoError(t, err)
+
+	dql := `{
+		person as var(func: eq(name, "Tom"))
+		banana as var(func: eq(fruit, "banana"))
+	}`
+	mu1 := &api.Mutation{
+		DelNquads: []byte(`uid(person) <like> * .`),
+	}
+	mu2 := &api.Mutation{
+		SetNquads: []byte(`uid(person) <like> uid(banana) .`),
+	}
+	req := &api.Request{
+		Query:     dql,
+		Mutations: []*api.Mutation{mu1, mu2},
+		CommitNow: true,
+	}
+	txn := gcli.NewTxn()
+	_, err = txn.Do(ctx, req)
+	require.NoError(t, err)
+
+	ssuite.Upgrade()
+
+	gcli, cleanup, err = doGrpcLogin(ssuite)
+	defer cleanup()
+	require.NoError(t, err)
+
+	queryDQL := `{
+		q(func: eq(name, "Tom")) {
+			uid
+			like { uid fruit }
+		}
+	}`
+	resp, err := gcli.NewReadOnlyTxn().Query(ctx, queryDQL)
+	require.NoError(t, err)
+
+	var result map[string]interface{}
+	err = json.Unmarshal(resp.Json, &result)
+	require.NoError(t, err)
+
+	q := result["q"].([]interface{})
+	require.Len(t, q, 1)
+
+	person := q[0].(map[string]interface{})
+	like := person["like"].(map[string]interface{})
+
+	_, hasUID := like["uid"]
+	require.True(t, hasUID, "like should have a uid field")
+
+	fruit := like["fruit"].(string)
+	require.Equal(t, "banana", fruit, "like should point to banana, not apple")
+
+	jsonStr := string(resp.Json)
+	uidCount := strings.Count(jsonStr, `"uid"`)
+	require.Equal(t, 2, uidCount, "JSON should have exactly 2 uid fields (one for person, one for like), not duplicates")
+}
