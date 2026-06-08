@@ -497,18 +497,36 @@ func (enc *encoder) AddListValue(fj fastJsonNode, attr uint16, v types.Val, list
 }
 
 func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
+	enc.addMapChildInternal(fj, val, false)
+}
+
+func (enc *encoder) ReplaceMapChild(fj, val fastJsonNode) {
+	enc.addMapChildInternal(fj, val, true)
+}
+
+func (enc *encoder) addMapChildInternal(fj, val fastJsonNode, replace bool) {
 	var childNode fastJsonNode
+	var prevChild fastJsonNode
 	child := enc.children(fj)
 	for child != nil {
 		if enc.getAttr(child) == enc.getAttr(val) {
 			childNode = child
 			break
 		}
+		prevChild = child
 		child = child.next
 	}
 
 	if childNode == nil {
 		enc.addChildren(fj, val)
+	} else if replace {
+		if prevChild == nil {
+			fj.child = val
+			val.next = childNode.next
+		} else {
+			prevChild.next = val
+			val.next = childNode.next
+		}
 	} else {
 		enc.addChildren(childNode, enc.children(val))
 	}
@@ -1510,7 +1528,7 @@ func (sg *SubGraph) preTraverse(enc *encoder, uid uint64, dst fastJsonNode) erro
 					if pc.List {
 						enc.AddListChild(dst, uc)
 					} else {
-						enc.AddMapChild(dst, uc)
+						enc.ReplaceMapChild(dst, uc)
 					}
 				}
 			}

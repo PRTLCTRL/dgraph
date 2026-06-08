@@ -89,6 +89,54 @@ func TestNormalizeJSONLimit(t *testing.T) {
 	require.Error(t, err, "Couldn't evaluate @normalize directive - too many results")
 }
 
+func TestSingleValuePredicateReplace(t *testing.T) {
+	enc := newEncoder()
+	root := enc.newNode(enc.idForAttr("person"))
+
+	likeAttr := enc.idForAttr("like")
+	uidAttr := enc.idForAttr("uid")
+	fruitAttr := enc.idForAttr("fruit")
+
+	// First UID (apple) - simulating old value
+	like1 := enc.newNode(likeAttr)
+	uid1, err := enc.makeUidNode(uidAttr, 0x2)
+	require.NoError(t, err)
+	enc.addChildren(like1, uid1)
+	fruitVal1 := types.Val{Tid: types.StringID, Value: "apple"}
+	require.NoError(t, enc.AddValue(like1, fruitAttr, fruitVal1))
+
+	// Second UID (banana) - simulating new value after mutation
+	like2 := enc.newNode(likeAttr)
+	uid2, err := enc.makeUidNode(uidAttr, 0x3)
+	require.NoError(t, err)
+	enc.addChildren(like2, uid2)
+	fruitVal2 := types.Val{Tid: types.StringID, Value: "banana"}
+	require.NoError(t, enc.AddValue(like2, fruitAttr, fruitVal2))
+
+	// Add both using ReplaceMapChild (simulating single-value predicate behavior)
+	enc.ReplaceMapChild(root, like1)
+	enc.ReplaceMapChild(root, like2)
+
+	// Encode to JSON
+	enc.buf.Reset()
+	enc.fixOrder(root)
+	require.NoError(t, enc.encode(root))
+
+	// Verify JSON is valid and contains only the second value
+	var result map[string]interface{}
+	err = json.Unmarshal(enc.buf.Bytes(), &result)
+	require.NoError(t, err, "JSON should be valid without duplicate keys")
+
+	like := result["like"].(map[string]interface{})
+	require.Equal(t, "0x3", like["uid"], "Should contain the latest UID (banana)")
+	require.Equal(t, "banana", like["fruit"], "Should contain the latest fruit value (banana)")
+
+	// Verify there's only one "uid" key by checking JSON string doesn't have duplicate
+	jsonStr := enc.buf.String()
+	uidCount := strings.Count(jsonStr, `"uid"`)
+	require.Equal(t, 1, uidCount, "JSON should have exactly one 'uid' key, got: %s", jsonStr)
+}
+
 func BenchmarkJsonMarshal(b *testing.B) {
 	inputStrings := [][]string{
 		{"largestring", strings.Repeat("a", 1024)},
