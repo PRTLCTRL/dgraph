@@ -1019,6 +1019,8 @@ func (l *List) setMutationAfterCommit(startTs, commitTs uint64, pl *pb.PostingLi
 		if hasDeleteAll(mpost) {
 			l.mutationMap.deleteAllMarker = commitTs
 			l.mutationMap.length = 0
+			// Clear out committedUids since deleteAll invalidates all previous postings
+			clear(l.mutationMap.committedUids)
 			continue
 		}
 
