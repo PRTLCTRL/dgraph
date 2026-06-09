@@ -497,20 +497,29 @@ func (enc *encoder) AddListValue(fj fastJsonNode, attr uint16, v types.Val, list
 }
 
 func (enc *encoder) AddMapChild(fj, val fastJsonNode) {
-	var childNode fastJsonNode
+	var childNode, prevChild fastJsonNode
 	child := enc.children(fj)
 	for child != nil {
 		if enc.getAttr(child) == enc.getAttr(val) {
 			childNode = child
 			break
 		}
+		prevChild = child
 		child = child.next
 	}
 
 	if childNode == nil {
 		enc.addChildren(fj, val)
 	} else {
-		enc.addChildren(childNode, enc.children(val))
+		// For single-value predicates, when we encounter duplicate attributes,
+		// we should replace the existing child instead of merging. This prevents
+		// invalid JSON with duplicate keys (e.g., multiple "uid" fields).
+		if prevChild == nil {
+			fj.child = childNode.next
+		} else {
+			prevChild.next = childNode.next
+		}
+		enc.addChildren(fj, val)
 	}
 }
 
