@@ -2932,3 +2932,118 @@ func (ssuite *SystestTestSuite) TestAddAndQueryZeroTimeValue() {
 		]
 	  }`, string(resp.Json))
 }
+
+func (ssuite *SystestTestSuite) TestMultipleMutationsNoDuplicateFields() {
+	t := ssuite.T()
+	gcli, cleanup, err := doGrpcLogin(ssuite)
+	defer cleanup()
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	op := &api.Operation{
+		Schema: `
+			name: string @index(exact) .
+			like: uid @reverse .
+			fruit: string @index(exact) .
+
+			type Person {
+				name
+				like
+			}
+			type Fruit {
+				fruit
+			}
+		`,
+	}
+	require.NoError(t, gcli.Alter(ctx, op))
+
+	txn := gcli.NewTxn()
+	assigned, err := txn.Mutate(ctx, &api.Mutation{
+		SetNquads: []byte(`
+			_:person <name> "Tom" .
+			_:person <dgraph.type> "Person" .
+			_:apple <fruit> "apple" .
+			_:apple <dgraph.type> "Fruit" .
+			_:banana <fruit> "banana" .
+			_:banana <dgraph.type> "Fruit" .
+			_:person <like> _:apple .
+		`),
+	})
+	require.NoError(t, err)
+	require.NoError(t, txn.Commit(ctx))
+
+	personUID := assigned.Uids["person"]
+	bananaUID := assigned.Uids["banana"]
+
+	txn = gcli.NewTxn()
+	dql := `{
+		person as var(func: eq(name, "Tom"))
+		banana as var(func: eq(fruit, "banana"))
+	}`
+	mu1 := &api.Mutation{
+		DelNquads: []byte(`uid(person) <like> * .`),
+	}
+	mu2 := &api.Mutation{
+		SetNquads: []byte(`uid(person) <like> uid(banana) .`),
+	}
+	req := &api.Request{
+		Query:     dql,
+		Mutations: []*api.Mutation{mu1, mu2},
+		CommitNow: true,
+	}
+	response, err := txn.Do(ctx, req)
+	require.NoError(t, err)
+
+	queryDQL := `{
+		q(func: eq(name, "Tom")) {
+			uid
+			like {
+				uid
+				fruit
+			}
+		}
+	}`
+
+	txn = gcli.NewReadOnlyTxn()
+	resp, err := txn.Query(ctx, queryDQL)
+	require.NoError(t, err)
+
+	expectedJSON := fmt.Sprintf(`{
+		"q": [
+			{
+				"uid": "%#x",
+				"like": {
+					"uid": "%#x",
+					"fruit": "banana"
+				}
+			}
+		]
+	}`, personUID, bananaUID)
+
+	var result map[string]interface{}
+	err = json.Unmarshal(resp.Json, &result)
+	require.NoError(t, err)
+
+	qResults := result["q"].([]interface{})
+	require.Len(t, qResults, 1)
+
+	person := qResults[0].(map[string]interface{})
+	like := person["like"].(map[string]interface{})
+
+	uidCount := 0
+	fruitCount := 0
+	for key := range like {
+		if key == "uid" {
+			uidCount++
+		} else if key == "fruit" {
+			fruitCount++
+		}
+	}
+
+	require.Equal(t, 1, uidCount, "Should have exactly one 'uid' field in 'like' object")
+	require.Equal(t, 1, fruitCount, "Should have exactly one 'fruit' field in 'like' object")
+	require.Equal(t, fmt.Sprintf("%#x", bananaUID), like["uid"])
+	require.Equal(t, "banana", like["fruit"])
+
+	_ = response
+}
