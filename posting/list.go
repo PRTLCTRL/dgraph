@@ -290,7 +290,26 @@ func (mm *MutableLayer) iterate(f func(ts uint64, pl *pb.PostingList), readTs ui
 	}
 
 	deleteAllMarker := mm.populateDeleteAll(readTs)
+	
+	// Check if currentEntries contains a delete-all marker
+	hasDeleteAllInCurrent := false
+	if mm.currentEntries != nil && mm.readTs == readTs {
+		for _, mpost := range mm.currentEntries.Postings {
+			if hasDeleteAll(mpost) {
+				hasDeleteAllInCurrent = true
+				break
+			}
+		}
+	}
+	
 	mm.iterateCommittedEntries(func(ts uint64, pl *pb.PostingList) {
+		// If there's a delete-all in currentEntries at readTs, we need to be more strict:
+		// exclude committedEntries at the exact same timestamp as the delete-all marker,
+		// because those entries were committed before the delete-all was added.
+		if hasDeleteAllInCurrent && ts == deleteAllMarker && ts == mm.readTs {
+			// Skip committed entries at the same timestamp as the delete-all in currentEntries
+			return
+		}
 		// Note this might not be required, but just here for safety
 		if ts >= deleteAllMarker && ts <= readTs {
 			f(ts, pl)
