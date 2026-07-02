@@ -721,13 +721,30 @@ func validateCondValue(cond string) error {
 	}
 
 	lower := strings.ToLower(cond)
-	if !strings.HasPrefix(lower, "@if(") && !strings.HasPrefix(lower, "@filter(") {
+	hasIfPrefix := strings.HasPrefix(lower, "@if")
+	hasFilterPrefix := strings.HasPrefix(lower, "@filter")
+	
+	if !hasIfPrefix && !hasFilterPrefix {
 		return errors.Errorf("invalid cond value: must start with @if( or @filter(")
 	}
 
+	// Find the opening parenthesis, allowing optional whitespace after @if or @filter
 	openIdx := strings.Index(cond, "(")
 	if openIdx == -1 {
 		return errors.Errorf("invalid cond value: missing opening parenthesis")
+	}
+
+	// Verify that only whitespace exists between the directive and the opening parenthesis
+	var directiveEnd int
+	if hasIfPrefix {
+		directiveEnd = 3 // len("@if")
+	} else {
+		directiveEnd = 7 // len("@filter")
+	}
+	
+	between := cond[directiveEnd:openIdx]
+	if strings.TrimSpace(between) != "" {
+		return errors.Errorf("invalid cond value: must start with @if( or @filter(")
 	}
 
 	depth := 0
