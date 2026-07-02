@@ -791,8 +791,22 @@ func (l *List) updateMutationLayer(mpost *pb.Posting, singleUidUpdate, hasCountI
 		// the case with the rest of the scalar predicates.
 		newPlist := &pb.PostingList{}
 		if mpost.Op != Del {
-			// If we are setting a new value then we can just delete all the older values.
-			newPlist.Postings = append(newPlist.Postings, createDeleteAllPosting())
+			// Check if there's already an explicit delete-all in currentEntries.
+			// If so, preserve it instead of creating a new one.
+			hasExistingDeleteAll := false
+			if l.mutationMap.currentEntries != nil {
+				for _, p := range l.mutationMap.currentEntries.Postings {
+					if hasDeleteAll(p) {
+						hasExistingDeleteAll = true
+						newPlist.Postings = append(newPlist.Postings, p)
+						break
+					}
+				}
+			}
+			if !hasExistingDeleteAll {
+				// If we are setting a new value then we can just delete all the older values.
+				newPlist.Postings = append(newPlist.Postings, createDeleteAllPosting())
+			}
 		}
 		newPlist.Postings = append(newPlist.Postings, mpost)
 		l.mutationMap.setCurrentEntries(mpost.StartTs, newPlist)
