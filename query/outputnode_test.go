@@ -304,3 +304,57 @@ func TestMarshalFloat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, out, string(result))
 }
+
+func TestAddMapChildReplacesDuplicates(t *testing.T) {
+	enc := newEncoder()
+	defer func() {
+		arenaPool.Put(enc.arena)
+		enc.alloc.Release()
+	}()
+
+	root := enc.newNode(enc.idForAttr("root"))
+
+	likeAttr := enc.idForAttr("like")
+	uidAttr := enc.idForAttr("uid")
+	fruitAttr := enc.idForAttr("fruit")
+
+	like1 := enc.newNode(likeAttr)
+	uid1, err := enc.makeUidNode(uidAttr, 0x2)
+	require.NoError(t, err)
+	enc.addChildren(like1, uid1)
+	fruit1Val := types.Val{Tid: types.StringID, Value: "apple"}
+	require.NoError(t, enc.AddValue(like1, fruitAttr, fruit1Val))
+	enc.AddMapChild(root, like1)
+
+	like2 := enc.newNode(likeAttr)
+	uid2, err := enc.makeUidNode(uidAttr, 0x3)
+	require.NoError(t, err)
+	enc.addChildren(like2, uid2)
+	fruit2Val := types.Val{Tid: types.StringID, Value: "banana"}
+	require.NoError(t, enc.AddValue(like2, fruitAttr, fruit2Val))
+	enc.AddMapChild(root, like2)
+
+	enc.fixOrder(root)
+
+	enc.buf.Reset()
+	require.NoError(t, enc.encode(root))
+
+	jsonStr := enc.buf.String()
+	t.Logf("Generated JSON: %s", jsonStr)
+
+	uidCount := strings.Count(jsonStr, `"uid"`)
+	fruitCount := strings.Count(jsonStr, `"fruit"`)
+
+	require.Equal(t, 1, uidCount, "JSON should only contain one 'uid' key, found %d", uidCount)
+	require.Equal(t, 1, fruitCount, "JSON should only contain one 'fruit' key, found %d", fruitCount)
+
+	var result map[string]interface{}
+	err = json.Unmarshal(enc.buf.Bytes(), &result)
+	require.NoError(t, err, "JSON should be valid")
+
+	like, ok := result["like"].(map[string]interface{})
+	require.True(t, ok, "like should be an object, not a list")
+
+	require.Equal(t, "0x3", like["uid"], "uid should be 0x3 (last value)")
+	require.Equal(t, "banana", like["fruit"], "fruit should be banana (last value)")
+}
