@@ -721,8 +721,26 @@ func validateCondValue(cond string) error {
 	}
 
 	lower := strings.ToLower(cond)
-	if !strings.HasPrefix(lower, "@if(") && !strings.HasPrefix(lower, "@filter(") {
-		return errors.Errorf("invalid cond value: must start with @if( or @filter(")
+
+	// Check if it starts with @if or @filter, allowing optional whitespace before the opening paren
+	hasValidPrefix := false
+	directive := ""
+	if strings.HasPrefix(lower, "@if") {
+		hasValidPrefix = true
+		directive = "@if"
+	} else if strings.HasPrefix(lower, "@filter") {
+		hasValidPrefix = true
+		directive = "@filter"
+	}
+
+	if !hasValidPrefix {
+		return errors.Errorf("invalid cond value: must start with @if or @filter")
+	}
+
+	// After the directive, skip any whitespace and ensure we have an opening parenthesis
+	afterDirective := strings.TrimSpace(cond[len(directive):])
+	if !strings.HasPrefix(afterDirective, "(") {
+		return errors.Errorf("invalid cond value: must have opening parenthesis after %s", directive)
 	}
 
 	openIdx := strings.Index(cond, "(")
