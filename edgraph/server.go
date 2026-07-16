@@ -721,7 +721,20 @@ func validateCondValue(cond string) error {
 	}
 
 	lower := strings.ToLower(cond)
-	if !strings.HasPrefix(lower, "@if(") && !strings.HasPrefix(lower, "@filter(") {
+	startsWithIf := strings.HasPrefix(lower, "@if")
+	startsWithFilter := strings.HasPrefix(lower, "@filter")
+
+	if !startsWithIf && !startsWithFilter {
+		return errors.Errorf("invalid cond value: must start with @if( or @filter(")
+	}
+
+	afterDirective := cond[3:]
+	if startsWithFilter {
+		afterDirective = cond[7:]
+	}
+
+	afterDirective = strings.TrimSpace(afterDirective)
+	if !strings.HasPrefix(afterDirective, "(") {
 		return errors.Errorf("invalid cond value: must start with @if( or @filter(")
 	}
 
